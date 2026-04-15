@@ -3,7 +3,11 @@
 ## Developer Environment
 
 - **OS**: Windows
-- **Install Clojure**: Use the MSI installer from https://github.com/clojure/brew-install/releases/latest
+- **Install Clojure**: Use the PowerShell installer (run as Administrator):
+  ```powershell
+  iwr -useb download.clojure.org/install/win-install-1.11.1.1165.ps1 | iex
+  ```
+  Or via Scoop: `scoop install clj-deps`
 - **Install Java**: Eclipse Temurin JDK 21 from https://adoptium.net/
 - **Install Node.js**: https://nodejs.org/ (required for shadow-cljs)
 - **Install dependencies**: `npm install`
