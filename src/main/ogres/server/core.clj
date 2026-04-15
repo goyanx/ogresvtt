@@ -126,22 +126,25 @@
         uuid (.getId session)]
     (cond (some? host)
           (do (swap! state! room-create host uuid session)
+              (log/info :event :room/created :room host :uuid uuid)
               (send session {:type :event :src uuid :dst uuid :data {:name :session/created :room host :uuid uuid}}))
           (some? join)
           (let [data (swap! state! room-join join uuid session)]
+            (log/info :event :session/joined :room join :uuid uuid)
             (send session {:type :event :src uuid :dst uuid :data {:name :session/joined :room join :uuid uuid}})
             (send-many (uuid->conns data uuid) {:type :event :src uuid :data {:name :session/join :room join :uuid uuid}}))
           :else
           (let [room (room-create-key)]
             (swap! state! room-create room uuid session)
+            (log/info :event :room/created :room room :uuid uuid)
             (send session {:type :event :src uuid :dst uuid :data {:name :session/created :room room :uuid uuid}})))
     session))
 
 (defn handle-ws-close [session _ _]
   (let [data (deref state!)
         uuid (.getId session)
-        room (get-in data [:conns uuid :room])
-        room (get-in data [:rooms room])
+        room-key (get-in data [:conns uuid :room])
+        room (get-in data [:rooms room-key])
         conns (uuid->conns data uuid)]
 
     ;; The connection has been closed; close the associated session.
@@ -151,19 +154,21 @@
     (if (= (:host room) uuid)
       ;; The host has left, destroying the session entirely. Find and close
       ;; all remaining connections.
-      (doseq [session conns :when (.isOpen session)]
-        (.close session))
+      (do (log/info :event :room/destroyed :room room-key :uuid uuid :peers (count conns))
+          (doseq [session conns :when (.isOpen session)]
+            (.close session)))
 
       ;; Notify all other connections in the same session that a connection
       ;; has been closed.
-      (send-many conns {:type :event :data {:name :session/leave :uuid uuid}}))
+      (do (log/info :event :session/left :room room-key :uuid uuid)
+          (send-many conns {:type :event :data {:name :session/leave :uuid uuid}})))
 
     ;; Update the sessions to remove the closing connection, potentially
     ;; also removing the room and closing all related connections within.
     (swap! state! room-leave uuid)))
 
-(defn handle-ws-error [_ _ error]
-  (log/error :message (.getMessage error)))
+(defn handle-ws-error [session _ error]
+  (log/error :event :ws/error :uuid (when session (.getId session)) :message (.getMessage error)))
 
 (defn handle-ws-text [session message]
   (stat-size-message! (.length message))
@@ -214,4 +219,6 @@
        (jetty/create-connector nil))))
 
 (defn -main [port]
-  (conn/start! (create-connector {:port (Integer/parseInt port)})))
+  (let [p (Integer/parseInt port)]
+    (log/info :event :server/start :port p)
+    (conn/start! (create-connector {:port p}))))

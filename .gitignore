@@ -9,6 +9,7 @@ pom.xml.asc
 *.iml
 *.jar
 *.log
+/logs/
 .calva
 .clj-kondo
 !.clj-kondo/config.edn
