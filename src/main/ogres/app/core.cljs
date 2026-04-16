@@ -1,5 +1,6 @@
 (ns ogres.app.core
-  (:require [ogres.app.component.error   :refer [error-page]]
+  (:require [ogres.app.ai.core           :as provider.ai]
+            [ogres.app.component.error   :refer [error-page]]
             [ogres.app.component.layout  :refer [layout]]
             [ogres.app.const             :refer [PATH]]
             [ogres.app.provider.cursor   :as provider.cursor]
@@ -43,8 +44,9 @@
                     ($ provider.shortcut/listeners)
                     ($ provider.session/listeners)
                     ($ provider.cursor/listeners)
-                    ($ error-boundary
-                      ($ layout))))))))))))
+                    ($ provider.ai/provider
+                      ($ error-boundary
+                        ($ layout)))))))))))))
 
 (defn ^:export main []
   (let [elem (.querySelector js/document "#root")

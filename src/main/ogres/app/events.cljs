@@ -1249,3 +1249,39 @@
        [:db/add camera-id :camera/selected -1]
        [:db/add scene-id :scene/props -1]]
       [])))
+
+;; --- AI Dungeon Master ---
+(defmethod
+  ^{:doc "Appends a narration entry to the root narration log.
+          Source is a string: 'ai', 'host', or 'system'."}
+  event-tx-fn :narration/append
+  [_ _ text source]
+  [{:db/ident :root
+    :root/narration
+    {:narration/text text
+     :narration/timestamp (.now js/Date)
+     :narration/source (or source "ai")}}])
+
+(defmethod
+  ^{:doc "Clears all narration entries from the root entity."}
+  event-tx-fn :narration/clear
+  [_]
+  [[:db/retract [:db/ident :root] :root/narration]])
+
+(defmethod
+  ^{:doc "Spawns a token at a scene-space point. Used by the AI DM tool
+          dispatcher which already has scene coordinates, bypassing the
+          screen→scene transform in :token/create."}
+  event-tx-fn :ai-dm/spawn-token
+  [data _ label point size]
+  (let [user   (ds/entity data [:db/ident :user])
+        camera (:user/camera user)
+        scene  (:camera/scene camera)]
+    (cond-> [{:db/id -1
+              :object/type :token/token
+              :object/point point
+              :token/label label}
+             [:db/add (:db/id scene) :scene/tokens -1]
+             [:db/add (:db/id camera) :camera/draw-mode :select]]
+      (some? size)
+      (conj {:db/id -1 :token/size size}))))
