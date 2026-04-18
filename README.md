@@ -60,37 +60,181 @@
 - Responsive design suitable for phones and tablets
 - Easy to adapt for any tabletop game system
 
-## Contributing
+**AI Dungeon Master** *(experimental)*
+- LLM-powered DM that reads the live board and controls NPC/monster tokens
+- Spawns, moves, and removes tokens; rolls initiative; updates HP
+- Narrates events to all players in real time via the DM Narration panel
+- Two-way chat — ask the DM questions and get in-character responses
+- Voice narration via Kokoro TTS (British male narrator by default)
+- Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
+- LangGraph mode adds assess → plan → validate → reflect-retry reasoning loop
 
-Interested in helping fix bugs or extending features? Look for issues labeled as **beginner friendly** and comment that you'd like to work on it. The following are instructions to start a local development environment (for developers only).
+---
 
-> [!IMPORTANT]
-> You'll need to have `node`, `npm`, and `clojure` installed.
+## Development Setup (Windows)
 
-```sh
-#!/bin/sh
+### Prerequisites
 
-# copy the repository
-git clone git@github.com:samcf/ogres.git
+| Tool | Install |
+|------|---------|
+| **Node.js** | [nodejs.org](https://nodejs.org/) |
+| **Java JDK 21** | [Eclipse Temurin](https://adoptium.net/) |
+| **Clojure** | PowerShell (run as Administrator): `iwr -useb download.clojure.org/install/win-install-1.11.1.1165.ps1 \| iex` |
+| **Python 3.11+** | [python.org](https://www.python.org/) — only needed for AI DM sidecar |
 
-# install dependencies and start the local web server
-# by default opens at http://localhost:8080
+### Frontend (ClojureScript)
+
+```powershell
+# Clone the repository
+git clone https://github.com/goyanx/ogresvtt.git
+cd ogresvtt
+
+# Switch to the AI DM feature branch
+git checkout claude/ai-dungeon-master-prd-xJuMc
+
+# Install JS dependencies
 npm install
-npm start
 
-# run the process that bundles CSS files
-npm run style
+# Start the frontend dev server (hot reload at http://localhost:8080)
+npx shadow-cljs watch app
+```
 
-# optionally, start the application server necessary
-# for hosting online sessions
+### Backend (Clojure game server)
+
+The backend is only needed for **multiplayer** online sessions. Solo/local play works without it.
+
+```powershell
+# In a separate terminal
 clojure -M -m ogres.server.core 5000
 ```
 
-## Run your own server
+Logs are written to `logs/ogres.log`. Create the directory first:
 
-You can run your own instance of this application by using Docker. For more information, refer to the [wiki docs](https://github.com/samcf/ogres/wiki/Docker-Usage). The following command will install and run the application.
+```powershell
+mkdir logs
+```
+
+---
+
+## AI Dungeon Master Setup
+
+The AI DM runs entirely in the host's browser. The LLM backend is your choice.
+
+### Option A — Ollama (local, recommended for privacy)
+
+1. Install [Ollama](https://ollama.com) and pull a tool-capable model:
+   ```powershell
+   ollama pull qwen2.5:14b-instruct-q4_K_M
+   ```
+
+2. Start Ollama with CORS enabled (required for browser fetch):
+   ```powershell
+   $env:OLLAMA_ORIGINS="*"
+   ollama serve
+   ```
+
+3. In OgresVTT open the **wand icon** panel → set:
+   - Backend: `Ollama (local, direct)`
+   - Endpoint: `http://localhost:11434`
+   - Model: `qwen2.5:14b-instruct-q4_K_M`
+
+### Option B — Grok xAI (cloud)
+
+1. Get an API key at [console.x.ai](https://console.x.ai)
+2. In OgresVTT open the **wand icon** panel → set:
+   - Backend: `Grok (xAI, direct)`
+   - API Key: your `xai-...` key *(stored in browser only, never sent to the OgresVTT server)*
+   - Model: `grok-3-mini`
+
+### Option C — LangGraph Sidecar (multi-step agentic reasoning)
+
+The sidecar adds a reasoning loop: **assess → plan → validate → reflect/retry** before executing tool calls. Requires Python.
+
+```powershell
+cd ai_dm
+pip install -r requirements.txt
+uvicorn ai_dm.main:app --port 8765 --reload
+```
+
+In OgresVTT open the **wand icon** panel → set Backend to `LangGraph sidecar (multi-step)`.
+
+### Voice Narration (optional)
+
+Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) — runs on CPU, no GPU needed.
+
+```powershell
+pip install kokoro soundfile numpy
+```
+
+On Windows, espeak-ng is needed for phonemization. Install it from the
+[espeak-ng releases page](https://github.com/espeak-ng/espeak-ng/releases/latest)
+(download the `.msi` installer). It may work without it for English — try without first.
+
+Once the sidecar is running, enable **Voice narration** in the AI DM panel and select a voice.
+**George (British male)** is the recommended dungeon master voice.
+
+---
+
+## Using the AI Dungeon Master
+
+### Quick Start
+
+1. Load a map scene and place some NPC tokens on the board
+2. Open the **wand icon (✦)** tab → configure backend, model, and scenario
+3. Write a scenario describing your campaign context, e.g.:
+   ```
+   Dark dungeon crawl inside Cragmaw Cave. 4 level-3 adventurers.
+   Goblins and a bugbear patrol the tunnels. Gothic horror tone.
+   Monsters retreat when below half HP. Narrate in second person.
+   ```
+4. Click **Run turn** to test a single manual turn
+5. Enable **Auto-approve** and set a turn interval to run autonomously
+6. Open the **T (narration)** tab to see and hear the DM's narration
+
+### Talking to the DM
+
+With the AI DM enabled, the narration panel input becomes a two-way chat:
+- Type a message and click **Ask** — your message is added to the conversation and the DM responds immediately
+- When disabled the input broadcasts plain host narration to all players
+
+### Panel Reference
+
+| Icon | Panel | Purpose |
+|------|-------|---------|
+| 👤 | Tokens | Manage token images |
+| 🖼 | Scene | Scene options, grid, fog of war |
+| 🖼🖼 | Props | Environmental prop images |
+| ⏳ | Initiative | Combat turn tracker |
+| ✦ | **AI DM** | Configure and control the AI Dungeon Master |
+| **T** | **Narration** | DM narration feed and chat |
+| 👥 | Lobby | Online session, room code, player list |
+| 🔧 | Data | Export/import/reset local data |
+
+### AI DM Config Reference
+
+| Setting | Description |
+|---------|-------------|
+| **Enable AI DM** | Activates the AI DM |
+| **Backend** | Ollama / Grok / LangGraph sidecar |
+| **Endpoint / Sidecar URL** | URL of your local Ollama or LangGraph server |
+| **Model** | LLM model name (`qwen2.5:14b-instruct-q4_K_M` recommended) |
+| **Scenario** | Free-text campaign context injected into every system prompt |
+| **Auto-approve** | Run turns automatically on a timer |
+| **Turn interval** | How often the DM acts (5 – 60 seconds) |
+| **Voice narration** | Speak narration aloud via Kokoro TTS |
+| **Voice** | TTS voice character (George British male recommended) |
+| **Speed** | Narration speaking rate (0.95× = slightly slower, more dramatic) |
+
+---
+
+## Docker (self-hosted)
 
 ```sh
-#!/bin/sh
 docker compose up -d
 ```
+
+For full configuration options see the [wiki docs](https://github.com/samcf/ogres/wiki/Docker-Usage).
+
+## Contributing
+
+Interested in helping fix bugs or extending features? Look for issues labeled **beginner friendly** and comment that you'd like to work on it.
