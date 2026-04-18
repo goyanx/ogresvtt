@@ -13,6 +13,19 @@
    :initiative/health
    :initiative/suffix])
 
+(defn- format-token [t]
+  (let [pt (:object/point t)]
+    (str "  - id: " (:db/id t)
+         ", label: \"" (or (:token/label t) "Unknown") "\""
+         (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
+         (when (:token/size t) (str ", size: " (:token/size t) "ft"))
+         (when (seq (:token/flags t))
+           (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
+         "\n")))
+
+(defn- player-token? [t]
+  (contains? (set (:token/flags t)) :player))
+
 (defn serialize-game-state
   "Serializes the current scene's game state from the DataScript database
    into a text block suitable for an LLM system prompt."
@@ -22,24 +35,21 @@
         sid   (:db/id scene)
         gs    (or (:scene/grid-size scene) grid-size)]
     (when sid
-      (let [tokens     (ds/pull-many db token-pull (map :db/id (:scene/tokens scene)))
+      (let [all-tokens (ds/pull-many db token-pull (map :db/id (:scene/tokens scene)))
+            players    (filter player-token? all-tokens)
+            npcs       (remove player-token? all-tokens)
             initiative (ds/pull-many db token-pull (map :db/id (:scene/initiative scene)))
             rounds     (:initiative/rounds scene)]
         (str
          "SCENE: " (or (:scene/label scene) "Unnamed") "\n"
          "GRID SIZE: " gs "px per tile (each tile = 5 feet)\n"
-         "\nTOKENS ON BOARD:\n"
-         (if (seq tokens)
-           (apply str
-             (for [t tokens
-                   :let [pt (:object/point t)]]
-               (str "  - id: " (:db/id t)
-                    ", label: \"" (or (:token/label t) "Unknown") "\""
-                    (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
-                    (when (:token/size t) (str ", size: " (:token/size t) "ft"))
-                    (when (seq (:token/flags t))
-                      (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
-                    "\n")))
+         "\nPLAYER TOKENS (do NOT move or remove these):\n"
+         (if (seq players)
+           (apply str (map format-token players))
+           "  (none)\n")
+         "\nNPC/MONSTER TOKENS (you control these):\n"
+         (if (seq npcs)
+           (apply str (map format-token npcs))
            "  (none)\n")
          (when (seq initiative)
            (str

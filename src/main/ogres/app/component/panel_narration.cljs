@@ -33,20 +33,27 @@
   (let [result   (hooks/use-query query [:db/ident :root])
         entries  (:root/narration result)
         sorted   (sort-by :narration/timestamp (or entries []))
+        ai-ctx   (uix/use-context ai/context)
+        pending  (and (some? ai-ctx) (:pending ai-ctx))
         list-ref (uix/use-ref)]
-    ;; Auto-scroll to bottom when new entries arrive
     (uix/use-effect
       (fn []
         (when-let [el (deref list-ref)]
           (set! (.-scrollTop el) (.-scrollHeight el))))
-      [(count sorted)])
+      [(count sorted) pending])
     ($ :.narration
       ($ :header
         ($ :h2 "DM Narration"))
-      (if (seq sorted)
+      (if (or (seq sorted) pending)
         ($ :ol.narration-list {:ref list-ref}
           (for [e sorted]
-            ($ entry {:key (:db/id e) :entity e})))
+            ($ entry {:key (:db/id e) :entity e}))
+          (when pending
+            ($ :li.narration-entry {:data-source "ai" :data-pending true}
+              ($ :.narration-entry-header
+                ($ :span.narration-entry-source "AI DM")
+                ($ :span.narration-entry-time "…"))
+              ($ :p.narration-entry-text "Thinking…"))))
         ($ :.narration-empty
           ($ icon {:name "dnd" :size 48})
           ($ :p "No narration yet. Enable the AI DM and run a turn to get started."))))))
