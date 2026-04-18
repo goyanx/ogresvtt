@@ -1,7 +1,20 @@
 (ns ogres.app.ai.tools)
 
 (def tool-definitions
-  [{:type "function"
+  [;; Query tool — in LangGraph mode the sidecar answers this locally.
+   ;; In direct Ollama/Grok mode the answer is already in the system prompt.
+   {:type "function"
+    :function
+    {:name "list_tokens"
+     :description "List tokens currently on the board with their id, label, type (player/npc), position, size, hp, and flags. Call this to confirm token IDs before acting."
+     :parameters
+     {:type "object"
+      :properties
+      {:filter {:type "string"
+                :enum ["all" "player" "npc"]
+                :description "Which tokens to return. Omit for all."}}
+      :required []}}}
+   {:type "function"
     :function
     {:name "narrate"
      :description "Emit narration text visible to all players. Call this once per turn."

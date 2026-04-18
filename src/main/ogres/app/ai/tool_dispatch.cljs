@@ -23,6 +23,13 @@
   "Dispatches a validated AI DM tool call to the OgresVTT event system."
   (fn [_dispatch _db tool-name _args _opts] tool-name))
 
+;; list_tokens is a query tool handled by the LangGraph sidecar.
+;; In direct mode the LLM already has token info in the system prompt,
+;; so this is a no-op on the client side.
+(defmethod dispatch-tool "list_tokens"
+  [_dispatch _db _ _args _opts]
+  {:ok true :note "list_tokens is resolved server-side in LangGraph mode"})
+
 (defmethod dispatch-tool "narrate"
   [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
   (when (seq text)

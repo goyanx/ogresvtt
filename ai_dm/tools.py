@@ -1,4 +1,32 @@
 TOOL_DEFINITIONS = [
+    # ------------------------------------------------------------------
+    # Query tools — executed inside the sidecar, results fed back to LLM
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tokens",
+            "description": (
+                "Query the current tokens on the board. "
+                "Returns id, label, type (player/npc), position, size, hp, and flags. "
+                "Call this when you need to confirm token IDs or check who is on the map."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "enum": ["all", "player", "npc"],
+                        "description": "Which tokens to return. Defaults to 'all'.",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Action tools — dispatched to the ClojureScript client
+    # ------------------------------------------------------------------
     {
         "type": "function",
         "function": {
@@ -96,3 +124,6 @@ TOOL_DEFINITIONS = [
         },
     },
 ]
+
+# Tools resolved inside the sidecar — never sent to the ClojureScript client.
+QUERY_TOOLS = {"list_tokens"}
