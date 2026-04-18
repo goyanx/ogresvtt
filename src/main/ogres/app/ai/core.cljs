@@ -7,6 +7,7 @@
             [ogres.app.ai.backends.ollama :as ollama]
             [ogres.app.ai.backends.grok :as grok]
             [ogres.app.ai.backends.langgraph :as langgraph]
+            [ogres.app.ai.voice :as voice]
             [ogres.app.const :refer [grid-size]]
             [ogres.app.hooks :as hooks]
             [ogres.app.provider.state :as state]
@@ -21,10 +22,13 @@
    :backend      :ollama
    :endpoint     "http://localhost:11434"
    :model        "qwen2.5:14b-instruct-q4_K_M"
-   :lg-endpoint  "http://localhost:8765"  ; LangGraph sidecar URL
+   :lg-endpoint  "http://localhost:8765"
    :scenario     ""
    :auto-approve true
-   :interval-ms  15000})
+   :interval-ms  15000
+   :voice-enabled false
+   :voice-id      "bm_george"
+   :voice-speed   0.95})
 
 (defn load-config
   "Loads AI DM configuration from localStorage, merging with defaults."
@@ -95,15 +99,19 @@
             (let [choice     (first (:choices response))
                   message    (:message choice)
                   tool-calls (:tool_calls message)
-                  content    (:content message)]
-              ;; If the model returned plain text content (no narrate tool call),
-              ;; treat it as narration.
+                  content    (:content message)
+                  speak!     (fn [text]
+                               (when (and (:voice-enabled config) (seq text))
+                                 (voice/speak! text
+                                   {:sidecar-url (:lg-endpoint config)
+                                    :voice       (:voice-id config)
+                                    :speed       (:voice-speed config)})))]
               (when (and (seq content) (empty? tool-calls))
-                (dispatch :narration/append content "ai"))
-              ;; Dispatch each tool call.
+                (dispatch :narration/append content "ai")
+                (speak! content))
               (when (seq tool-calls)
-                (tool-dispatch/dispatch-tool-calls dispatch db tool-calls))
-              ;; Append to conversation history (keep last 20 messages).
+                (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
+                  {:on-narrate speak!}))
               (set-history
                 (fn [h]
                   (let [h (conj (vec h) user-msg (or message {:role "assistant" :content ""}))]

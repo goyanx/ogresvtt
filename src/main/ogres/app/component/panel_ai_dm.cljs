@@ -19,7 +19,8 @@
         [api-key set-api-key] (uix/use-state #(.getItem js/localStorage "ai-dm-api-key"))]
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
-            {:keys [enabled backend endpoint model scenario auto-approve interval-ms]} config]
+            {:keys [enabled backend endpoint model scenario auto-approve interval-ms
+                    voice-enabled voice-id voice-speed]} config]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")
@@ -102,6 +103,36 @@
                          :checked (boolean auto-approve)
                          :on-change #(update-config
                                        (fn [c] (assoc c :auto-approve (not auto-approve))))}))
+
+            ;; Voice narration
+            ($ field-row {:label "Voice narration"}
+              ($ :input {:type "checkbox"
+                         :checked (boolean voice-enabled)
+                         :on-change #(update-config
+                                       (fn [c] (assoc c :voice-enabled (not voice-enabled))))}))
+
+            (when voice-enabled
+              ($ field-row {:label "Voice"}
+                ($ :select
+                  {:value (or voice-id "bm_george")
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :voice-id (.. % -target -value))))}
+                  ($ :option {:value "bm_george"} "George (British male) ★")
+                  ($ :option {:value "bm_lewis"}  "Lewis (British male)")
+                  ($ :option {:value "am_adam"}   "Adam (American male)")
+                  ($ :option {:value "am_echo"}   "Echo (American male)")
+                  ($ :option {:value "af_sky"}    "Sky (American female)")
+                  ($ :option {:value "af_nova"}   "Nova (American female)")
+                  ($ :option {:value "bf_emma"}   "Emma (British female)"))))
+
+            (when voice-enabled
+              ($ field-row {:label (str "Speed (" (or voice-speed 0.95) "×)")}
+                ($ :input {:type "range"
+                            :min 0.7 :max 1.3 :step 0.05
+                            :value (or voice-speed 0.95)
+                            :on-change #(update-config
+                                          (fn [c] (assoc c :voice-speed
+                                                    (js/parseFloat (.. % -target -value)))))})))
 
             ;; Interval
             ($ field-row {:label (str "Turn interval (" (/ interval-ms 1000) "s)")}

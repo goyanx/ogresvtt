@@ -21,16 +21,17 @@
 
 (defmulti dispatch-tool
   "Dispatches a validated AI DM tool call to the OgresVTT event system."
-  (fn [_dispatch _db tool-name _args] tool-name))
+  (fn [_dispatch _db tool-name _args _opts] tool-name))
 
 (defmethod dispatch-tool "narrate"
-  [dispatch _db _ {:keys [text]}]
+  [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
   (when (seq text)
-    (dispatch :narration/append text "ai"))
+    (dispatch :narration/append text "ai")
+    (when on-narrate (on-narrate text)))
   {:ok true})
 
 (defmethod dispatch-tool "move_token"
-  [dispatch db _ {:keys [token_id x y]}]
+  [dispatch db _ {:keys [token_id x y]} _opts]
   (if (valid-token? db token_id)
     (let [entity (ds/entity db token_id)
           flags  (:token/flags entity)]
@@ -45,7 +46,7 @@
     {:ok false :reason (str "Token " token_id " not found.")}))
 
 (defmethod dispatch-tool "spawn_token"
-  [dispatch db _ {:keys [label x y size]}]
+  [dispatch db _ {:keys [label x y size]} _opts]
   (let [user   (ds/entity db [:db/ident :user])
         camera (:user/camera user)
         scene  (:camera/scene camera)
@@ -63,7 +64,7 @@
     {:ok true}))
 
 (defmethod dispatch-tool "remove_token"
-  [dispatch db _ {:keys [token_id]}]
+  [dispatch db _ {:keys [token_id]} _opts]
   (if (valid-token? db token_id)
     (let [entity (ds/entity db token_id)
           flags  (:token/flags entity)]
@@ -74,14 +75,14 @@
     {:ok false :reason (str "Token " token_id " not found.")}))
 
 (defmethod dispatch-tool "update_hp"
-  [dispatch db _ {:keys [token_id hp]}]
+  [dispatch db _ {:keys [token_id hp]} _opts]
   (if (valid-token? db token_id)
     (do (dispatch :initiative/change-health token_id (fn [_ v] v) (str hp))
         {:ok true})
     {:ok false :reason (str "Token " token_id " not found.")}))
 
 (defmethod dispatch-tool "roll_initiative"
-  [dispatch db _ {:keys [token_ids]}]
+  [dispatch db _ {:keys [token_ids]} _opts]
   (let [valid-ids (filterv #(valid-token? db %) token_ids)]
     (when (seq valid-ids)
       (dispatch :initiative/toggle valid-ids true)
@@ -89,18 +90,18 @@
     {:ok true :added (count valid-ids)}))
 
 (defmethod dispatch-tool "advance_turn"
-  [dispatch _db _ _args]
+  [dispatch _db _ _args _opts]
   (dispatch :initiative/next)
   {:ok true})
 
 (defmethod dispatch-tool :default
-  [_ _ tool-name _]
+  [_ _ tool-name _ _opts]
   {:ok false :reason (str "Unknown tool: " tool-name)})
 
 (defn dispatch-tool-calls
   "Processes a sequence of tool calls from the LLM response, dispatching
    each to the OgresVTT event system. Returns a vector of results."
-  [dispatch db tool-calls]
+  [dispatch db tool-calls & [opts]]
   (into []
     (for [tc tool-calls
           :let [fname (get-in tc [:function :name])
@@ -109,6 +110,6 @@
                         (js->clj (js/JSON.parse raw) :keywordize-keys true)
                         (catch :default _ {}))]]
       (try
-        (dispatch-tool dispatch db fname args)
+        (dispatch-tool dispatch db fname args (or opts {}))
         (catch :default e
           {:ok false :reason (.-message e)})))))

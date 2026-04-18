@@ -1,7 +1,11 @@
 """
 AI Dungeon Master FastAPI sidecar.
-Exposes POST /dm/turn — ClojureScript calls this instead of Ollama directly
-when the LangGraph backend is selected.
+
+Endpoints:
+  POST /dm/turn   — LangGraph multi-step turn (returns tool calls + narration)
+  POST /dm/speak  — Kokoro TTS (returns WAV audio bytes)
+  GET  /dm/voices — List available TTS voices
+  GET  /health
 
 Start with:
   uvicorn ai_dm.main:app --port 8765 --reload
@@ -9,6 +13,7 @@ Start with:
 import functools
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ai_dm.graph import build_graph
@@ -19,16 +24,20 @@ app = FastAPI(title="AI DM LangGraph Sidecar")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
+# ---------------------------------------------------------------------------
+# /dm/turn
+# ---------------------------------------------------------------------------
+
 class TurnRequest(BaseModel):
-    backend: str = "ollama"        # "ollama" | "grok"
+    backend: str = "ollama"
     endpoint: str = "http://localhost:11434"
     model: str = "qwen2.5:14b-instruct-q4_K_M"
-    api_key: str = ""              # Grok only
+    api_key: str = ""
     scenario: str = ""
     game_state: str = ""
     history: list[dict] = []
@@ -81,6 +90,56 @@ async def dm_turn(req: TurnRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# /dm/speak  — Kokoro TTS
+# ---------------------------------------------------------------------------
+
+class SpeakRequest(BaseModel):
+    text: str
+    voice: str = "bm_george"
+    speed: float = 0.95
+
+
+@app.post("/dm/speak")
+async def dm_speak(req: SpeakRequest):
+    import asyncio
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    try:
+        from ai_dm.tts import synthesize
+        loop = asyncio.get_event_loop()
+        wav_bytes = await loop.run_in_executor(
+            None, synthesize, req.text, req.voice, req.speed
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Kokoro TTS not installed. Run: pip install kokoro soundfile",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
+@app.get("/dm/voices")
+def dm_voices():
+    try:
+        from ai_dm.tts import AVAILABLE_VOICES
+        return {"voices": AVAILABLE_VOICES}
+    except ImportError:
+        return {"voices": [], "error": "kokoro not installed"}
+
+
+# ---------------------------------------------------------------------------
+# /health
+# ---------------------------------------------------------------------------
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    tts_available = True
+    try:
+        import kokoro  # noqa: F401
+    except ImportError:
+        tts_available = False
+    return {"status": "ok", "tts": tts_available}
