@@ -15,11 +15,11 @@
 (defui ^:memo panel []
   (let [result (hooks/use-query query)
         {:keys [user/host]} result
-        ctx (uix/use-context ai/context)]
+        ctx (uix/use-context ai/context)
+        [api-key set-api-key] (uix/use-state #(.getItem js/localStorage "ai-dm-api-key"))]
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
-            {:keys [enabled backend endpoint model scenario auto-approve interval-ms]} config
-            [api-key set-api-key] (uix/use-state #(.getItem js/localStorage "ai-dm-api-key"))]
+            {:keys [enabled backend endpoint model scenario auto-approve interval-ms]} config]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")

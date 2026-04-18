@@ -157,7 +157,7 @@
         (when (and (:enabled config) (:auto-approve config))
           (let [id (js/setInterval trigger-turn (:interval-ms config))]
             (fn [] (js/clearInterval id)))))
-      [(:enabled config) (:auto-approve config) (:interval-ms config) trigger-turn])
+      [config (:enabled config) (:auto-approve config) (:interval-ms config) trigger-turn])
 
     ($ context {:value ctx-value}
       children)))
