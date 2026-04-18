@@ -44,7 +44,7 @@
    :scene      {:icon "easel" :label "Scene options"}
    :tokens     {:icon "person-circle" :label "Token images"}
    :props      {:icon "images" :label "Prop images"}
-   :ai-dm      {:icon "stars" :label "AI Dungeon Master"}
+   :ai-dm      {:icon "magic" :label "AI Dungeon Master"}
    :narration  {:icon "fonts" :label "DM Narration"}})
 
 (def ^:private forms
