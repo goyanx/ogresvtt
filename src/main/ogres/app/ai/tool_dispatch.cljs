@@ -10,6 +10,16 @@
     (and (some? entity)
          (= (:object/type entity) :token/token))))
 
+(def ^:private direction->delta
+  {"north"     [ 0 -1]
+   "south"     [ 0  1]
+   "east"      [ 1  0]
+   "west"      [-1  0]
+   "northeast" [ 1 -1]
+   "northwest" [-1 -1]
+   "southeast" [ 1  1]
+   "southwest" [-1  1]})
+
 (defn ^:private snap-to-grid
   "Snaps a pixel coordinate to the nearest grid cell center."
   [x y]
@@ -36,6 +46,18 @@
     (dispatch :narration/append text "ai")
     (when on-narrate (on-narrate text)))
   {:ok true})
+
+(defmethod dispatch-tool "move_player_token"
+  [dispatch db _ {:keys [token_id direction squares]} _opts]
+  (if (valid-token? db token_id)
+    (if-let [[dx dy] (direction->delta (or direction "north"))]
+      (let [n     (max 1 (or squares 1))
+            entity (:object/point (ds/entity db token_id))
+            delta  (Vec2. (* dx n grid-size) (* dy n grid-size))]
+        (dispatch :objects/translate token_id delta)
+        {:ok true :moved {:squares n :direction direction}})
+      {:ok false :reason (str "Unknown direction: " direction)})
+    {:ok false :reason (str "Token " token_id " not found.")}))
 
 (defmethod dispatch-tool "move_token"
   [dispatch db _ {:keys [token_id x y]} _opts]

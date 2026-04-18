@@ -10,7 +10,13 @@ import json
 import re
 from ai_dm.state import DMState
 
+# These tools must never target a player-flagged token
 PLAYER_PROTECTED = {"move_token", "remove_token"}
+
+VALID_DIRECTIONS = {
+    "north", "south", "east", "west",
+    "northeast", "northwest", "southeast", "southwest",
+}
 MAX_RETRIES = 2
 
 
@@ -53,5 +59,13 @@ def validate(state: DMState) -> DMState:
                 val = args.get(coord)
                 if val is None or not isinstance(val, int) or val < 0:
                     errors.append(f"{name}: {coord} must be a non-negative integer, got {val!r}")
+
+        if name == "move_player_token":
+            direction = args.get("direction")
+            if direction not in VALID_DIRECTIONS:
+                errors.append(f"move_player_token: invalid direction {direction!r}")
+            tid = args.get("token_id")
+            if tid is not None and tid not in known_ids:
+                errors.append(f"move_player_token: token_id {tid} does not exist on board")
 
     return {**state, "validation_errors": errors}

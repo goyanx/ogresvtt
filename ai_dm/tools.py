@@ -118,6 +118,35 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "move_player_token",
+            "description": (
+                "Move a player-controlled token by a number of squares in a compass direction. "
+                "Use ONLY when the player explicitly says their character moves. "
+                "Never use this on your own initiative."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "token_id": {"type": "integer"},
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "north", "south", "east", "west",
+                            "northeast", "northwest", "southeast", "southwest",
+                        ],
+                    },
+                    "squares": {
+                        "type": "integer",
+                        "description": "Number of grid squares to move. Defaults to 1.",
+                    },
+                },
+                "required": ["token_id", "direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "advance_turn",
             "description": "Advance the initiative tracker to the next combatant's turn.",
             "parameters": {"type": "object", "properties": {}},

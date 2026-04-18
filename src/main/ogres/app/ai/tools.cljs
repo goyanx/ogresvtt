@@ -78,6 +78,20 @@
       :required ["token_ids"]}}}
    {:type "function"
     :function
+    {:name "move_player_token"
+     :description "Move a player-controlled token by a number of squares in a compass direction. Use this ONLY when the player explicitly says their character moves (e.g. 'I move north', 'I walk to the door'). Never use this on your own initiative."
+     :parameters
+     {:type "object"
+      :properties
+      {:token_id  {:type "integer" :description "Entity ID of the player token."}
+       :direction {:type "string"
+                   :enum ["north" "south" "east" "west"
+                          "northeast" "northwest" "southeast" "southwest"]
+                   :description "Direction the player is moving."}
+       :squares   {:type "integer" :description "Number of grid squares to move. Defaults to 1."}}
+      :required ["token_id" "direction"]}}}
+   {:type "function"
+    :function
     {:name "advance_turn"
      :description "Advance the initiative tracker to the next combatant's turn."
      :parameters

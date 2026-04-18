@@ -79,7 +79,9 @@
    "RULES:\n"
    "- Use the provided tool functions to take actions.\n"
    "- Always call the 'narrate' tool once per turn to describe what happens.\n"
-   "- Do NOT move or remove tokens with the 'player' flag — they are controlled by players.\n"
+   "- Do NOT use move_token on player-flagged tokens — use move_player_token instead.\n"
+   "- Use move_player_token ONLY when a player explicitly states their character moves (e.g. 'I move north', 'I go east 2 squares', 'I run to the door'). Infer direction from their message.\n"
+   "- Do not move player tokens unless the player asked for it in this message.\n"
    "- Keep narration under 100 words per turn.\n"
    "- Position coordinates are in pixels. The grid cell size is " scene-grid-size "px (= 5 feet).\n"
    "- Snap token positions to grid centers: x = col * " scene-grid-size " + " (/ scene-grid-size 2)
