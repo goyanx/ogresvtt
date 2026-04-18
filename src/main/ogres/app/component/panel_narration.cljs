@@ -30,22 +30,22 @@
       ($ :p.narration-entry-text text))))
 
 (defui ^:memo panel []
-  (let [result   (hooks/use-query query [:db/ident :root])
-        entries  (:root/narration result)
-        sorted   (sort-by :narration/timestamp (or entries []))
-        ai-ctx   (uix/use-context ai/context)
-        pending  (and (some? ai-ctx) (:pending ai-ctx))
-        list-ref (uix/use-ref)]
+  (let [result     (hooks/use-query query [:db/ident :root])
+        entries    (:root/narration result)
+        sorted     (sort-by :narration/timestamp (or entries []))
+        ai-ctx     (uix/use-context ai/context)
+        pending    (and (some? ai-ctx) (:pending ai-ctx))
+        bottom-ref (uix/use-ref)]
     (uix/use-effect
       (fn []
-        (when-let [el (deref list-ref)]
-          (set! (.-scrollTop el) (.-scrollHeight el))))
+        (when-let [el (deref bottom-ref)]
+          (.scrollIntoView el #js {:behavior "smooth" :block "end"})))
       [(count sorted) pending])
     ($ :.narration
       ($ :header
         ($ :h2 "DM Narration"))
       (if (or (seq sorted) pending)
-        ($ :ol.narration-list {:ref list-ref}
+        ($ :ol.narration-list
           (for [e sorted]
             ($ entry {:key (:db/id e) :entity e}))
           (when pending
@@ -53,7 +53,8 @@
               ($ :.narration-entry-header
                 ($ :span.narration-entry-source "AI DM")
                 ($ :span.narration-entry-time "…"))
-              ($ :p.narration-entry-text "Thinking…"))))
+              ($ :p.narration-entry-text "Thinking…")))
+          ($ :li {:ref bottom-ref :style {:height 0 :padding 0 :margin 0 :list-style "none"}}))
         ($ :.narration-empty
           ($ icon {:name "dnd" :size 48})
           ($ :p "No narration yet. Enable the AI DM and run a turn to get started."))))))

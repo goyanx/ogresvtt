@@ -6,6 +6,7 @@
             [ogres.app.ai.tool-dispatch :as tool-dispatch]
             [ogres.app.ai.backends.ollama :as ollama]
             [ogres.app.ai.backends.grok :as grok]
+            [ogres.app.ai.backends.langgraph :as langgraph]
             [ogres.app.const :refer [grid-size]]
             [ogres.app.hooks :as hooks]
             [ogres.app.provider.state :as state]
@@ -19,7 +20,8 @@
   {:enabled      false
    :backend      :ollama
    :endpoint     "http://localhost:11434"
-   :model        "llama3.1"
+   :model        "qwen2.5:14b-instruct-q4_K_M"
+   :lg-endpoint  "http://localhost:8765"  ; LangGraph sidecar URL
    :scenario     ""
    :auto-approve true
    :interval-ms  15000})
@@ -55,13 +57,17 @@
   "Dispatches a chat completion request to the configured backend."
   [config messages]
   (case (:backend config)
-    :ollama (ollama/chat-completion
-              {:endpoint (:endpoint config)
-               :model    (:model config)
-               :messages messages})
-    :grok   (grok/chat-completion
-              {:model    (:model config)
-               :messages messages})
+    :ollama    (ollama/chat-completion
+                 {:endpoint (:endpoint config)
+                  :model    (:model config)
+                  :messages messages})
+    :grok      (grok/chat-completion
+                 {:model    (:model config)
+                  :messages messages})
+    :langgraph (langgraph/chat-completion
+                 {:endpoint (:lg-endpoint config)
+                  :model    (:backend config)
+                  :messages messages})
     (js/Promise.reject (js/Error. (str "Unknown backend: " (:backend config))))))
 
 ;; ---------------------------------------------------------------------------

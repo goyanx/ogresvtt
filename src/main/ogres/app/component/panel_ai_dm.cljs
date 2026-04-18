@@ -42,8 +42,9 @@
                 {:value (name backend)
                  :on-change #(update-config
                                (fn [c] (assoc c :backend (keyword (.. % -target -value)))))}
-                ($ :option {:value "ollama"} "Ollama (local)")
-                ($ :option {:value "grok"} "Grok (xAI)")))
+                ($ :option {:value "ollama"}    "Ollama (local, direct)")
+                ($ :option {:value "grok"}      "Grok (xAI, direct)")
+                ($ :option {:value "langgraph"} "LangGraph sidecar (multi-step)")))
 
             ;; Ollama endpoint
             (when (= backend :ollama)
@@ -54,6 +55,16 @@
                    :placeholder "http://localhost:11434"
                    :on-change #(update-config
                                  (fn [c] (assoc c :endpoint (.. % -target -value))))})))
+
+            ;; LangGraph sidecar endpoint
+            (when (= backend :langgraph)
+              ($ field-row {:label "Sidecar URL"}
+                ($ :input.text
+                  {:type "text"
+                   :value (or (:lg-endpoint config) "")
+                   :placeholder "http://localhost:8765"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :lg-endpoint (.. % -target -value))))})))
 
             ;; Grok API key
             (when (= backend :grok)
@@ -103,8 +114,9 @@
 
           ($ :p.ai-dm-help
             (case backend
-              :ollama "Ensure Ollama is running with OLLAMA_ORIGINS=* for CORS support."
-              :grok   "Your API key is stored in this browser only and never sent to the OgresVTT server."
+              :ollama    "Ensure Ollama is running with OLLAMA_ORIGINS=* for CORS support."
+              :grok      "Your API key is stored in this browser only and never sent to the OgresVTT server."
+              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload"
               ""))))
       ;; Non-host or context not available
       ($ :.ai-dm
