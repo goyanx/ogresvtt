@@ -140,6 +140,17 @@
               (run-turn! conn dispatch config history set-history set-pending)))
           [conn dispatch config history pending])
 
+        send-message
+        (uix/use-callback
+          (fn [text]
+            (when-not pending
+              (dispatch :narration/append text "host")
+              (let [user-msg {:role "user" :content text}
+                    history' (vec (take-last 20 (conj history user-msg)))]
+                (set-history history')
+                (run-turn! conn dispatch config history' set-history set-pending))))
+          [conn dispatch config history pending])
+
         ctx-value
         (uix/use-memo
           (fn []
@@ -148,8 +159,9 @@
              :pending       pending
              :history       history
              :trigger-turn  trigger-turn
+             :send-message  send-message
              :clear-history #(set-history [])})
-          [config update-config pending history trigger-turn])]
+          [config update-config pending history trigger-turn send-message])]
 
     ;; Auto-run timer
     (uix/use-effect

@@ -1,5 +1,6 @@
 (ns ogres.app.component.panel-narration
-  (:require [ogres.app.component :refer [icon]]
+  (:require [ogres.app.ai.core :as ai]
+            [ogres.app.component :refer [icon]]
             [ogres.app.hooks :as hooks]
             [uix.core :as uix :refer [defui $]]))
 
@@ -51,9 +52,12 @@
           ($ :p "No narration yet. Enable the AI DM and run a turn to get started."))))))
 
 (defui ^:memo actions []
-  (let [dispatch (hooks/use-dispatch)
-        result   (hooks/use-query [[:user/host :default true]])
-        host     (:user/host result)
+  (let [dispatch   (hooks/use-dispatch)
+        result     (hooks/use-query [[:user/host :default true]])
+        host       (:user/host result)
+        ai-ctx     (uix/use-context ai/context)
+        ai-enabled (and (some? ai-ctx) (:enabled (:config ai-ctx)))
+        pending    (and (some? ai-ctx) (:pending ai-ctx))
         [text set-text] (uix/use-state "")]
     (when host
       ($ :<>
@@ -62,16 +66,19 @@
            (fn [e]
              (.preventDefault e)
              (when (seq text)
-               (dispatch :narration/append text "host")
+               (if ai-enabled
+                 ((:send-message ai-ctx) text)
+                 (dispatch :narration/append text "host"))
                (set-text "")))}
           ($ :input.text
-            {:type "text"
-             :value text
-             :placeholder "Add narration..."
-             :on-change #(set-text (.. % -target -value))})
+            {:type        "text"
+             :value       text
+             :placeholder (if ai-enabled "Ask the DM..." "Add narration...")
+             :disabled    pending
+             :on-change   #(set-text (.. % -target -value))})
           ($ :button.button.button-primary
-            {:type "submit" :disabled (empty? text)}
-            "Send"))
+            {:type "submit" :disabled (or (empty? text) pending)}
+            (if ai-enabled "Ask" "Send")))
         ($ :button.button.button-neutral
           {:on-click #(dispatch :narration/clear)}
           "Clear")))))
