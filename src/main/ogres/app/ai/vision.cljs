@@ -244,34 +244,43 @@
                   origin-x     0
                   origin-y     0
                   crop-squares 3}}]
-  (let [valid-tokens (filterv (fn [{:keys [db/id object/point]}] (and id point)) tokens)
-        ;; Crop output canvas size — fixed regardless of scene-gs so the
-        ;; vision model always receives the same resolution.
+  (let [t0           (js/performance.now)
+        valid-tokens (filterv (fn [{:keys [db/id object/point]}] (and id point)) tokens)
         dst-px       (* crop-squares const-gs)
-        ;; Source region size in original image pixels.
         src-px       (* crop-squares scene-gs)
-        ;; Scale factor: how many image pixels equal one scene-space pixel.
         img-scale    (/ scene-gs const-gs)]
+    (js/console.log (str "[vision/terrain] start — " (count valid-tokens) " tokens"))
     (if (empty? valid-tokens)
       (js/Promise.resolve {})
       (-> (idb-read image-hash)
           (.then (fn [record]
+                   (js/console.log (str "[vision/terrain] idb-read "
+                                        (.toFixed (- (js/performance.now) t0) 0) "ms"))
                    (if (and record (.-data record))
                      (load-image-from-blob (.-data record))
                      (js/Promise.resolve nil))))
           (.then (fn [img]
                    (if img
-                     ;; Convert each token's scene-space position to image-space,
-                     ;; crop synchronously, then fire one batched network request.
-                     (let [entries (mapv (fn [{:keys [db/id object/point]}]
+                     (let [t1      (js/performance.now)
+                           entries (mapv (fn [{:keys [db/id object/point]}]
                                           (let [ix (+ (* (.-x point) img-scale) origin-x)
                                                 iy (+ (* (.-y point) img-scale) origin-y)]
                                             {:id  id
                                              :b64 (crop-to-base64 img ix iy src-px dst-px)}))
-                                         valid-tokens)]
-                       (batch-query-vision-model endpoint model entries))
+                                         valid-tokens)
+                           _       (js/console.log (str "[vision/terrain] crops done "
+                                                        (.toFixed (- (js/performance.now) t1) 0)
+                                                        "ms — sending " (count entries)
+                                                        " images to model"))]
+                       (-> (batch-query-vision-model endpoint model entries)
+                           (.then (fn [r]
+                                    (js/console.log (str "[vision/terrain] model response "
+                                                         (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                                    r))))
                      (js/Promise.resolve {}))))
-          (.catch (fn [_] {}))))))
+          (.catch (fn [e]
+                    (js/console.warn "[vision/terrain] failed" e)
+                    {})))))))
 
 (defn detect-local-visibility!
   "Detects local visual context around observer tokens (players and NPCs).
@@ -296,36 +305,50 @@
                   origin-y        0
                   default-squares 10
                   dst-px          (* 10 const-gs)}}]
-  (let [img-scale  (/ scene-gs const-gs)
+  (let [t0         (js/performance.now)
+        img-scale  (/ scene-gs const-gs)
         observers  (filterv
                      (fn [{:keys [db/id object/point]}]
                        (and id point))
                      tokens)]
+    (js/console.log (str "[vision/local] start — " (count observers) " observers"))
     (if (empty? observers)
       (js/Promise.resolve {})
       (-> (idb-read image-hash)
           (.then (fn [record]
+                   (js/console.log (str "[vision/local] idb-read "
+                                        (.toFixed (- (js/performance.now) t0) 0) "ms"))
                    (if (and record (.-data record))
                      (load-image-from-blob (.-data record))
                      (js/Promise.resolve nil))))
           (.then
             (fn [img]
               (if img
-                (let [entries
-                      (mapv
-                        (fn [{:keys [db/id object/point] :as token}]
-                          (let [radius (max 2 (or (token-vision-squares token) default-squares))
-                                src-px (* 2 radius scene-gs)
-                                ix     (+ (* (.-x point) img-scale) origin-x)
-                                iy     (+ (* (.-y point) img-scale) origin-y)]
-                            {:id             id
-                             :kind           (token-kind token)
-                             :radius-squares radius
-                             :b64            (crop-to-base64 img ix iy src-px dst-px)}))
-                        observers)]
-                  (batch-query-local-context-model endpoint model entries))
+                (let [t1      (js/performance.now)
+                      entries (mapv
+                                (fn [{:keys [db/id object/point] :as token}]
+                                  (let [radius (max 2 (or (token-vision-squares token) default-squares))
+                                        src-px (* 2 radius scene-gs)
+                                        ix     (+ (* (.-x point) img-scale) origin-x)
+                                        iy     (+ (* (.-y point) img-scale) origin-y)]
+                                    {:id             id
+                                     :kind           (token-kind token)
+                                     :radius-squares radius
+                                     :b64            (crop-to-base64 img ix iy src-px dst-px)}))
+                                observers)
+                      _       (js/console.log (str "[vision/local] crops done "
+                                                   (.toFixed (- (js/performance.now) t1) 0)
+                                                   "ms — sending " (count entries)
+                                                   " images to model"))]
+                  (-> (batch-query-local-context-model endpoint model entries)
+                      (.then (fn [r]
+                               (js/console.log (str "[vision/local] model response "
+                                                    (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                               r))))
                 (js/Promise.resolve {}))))
-          (.catch (fn [_] {}))))))
+          (.catch (fn [e]
+                    (js/console.warn "[vision/local] failed" e)
+                    {}))))))
 
 (defn detect-player-visibility!
   "Backward-compatible wrapper; now includes NPC tokens too."

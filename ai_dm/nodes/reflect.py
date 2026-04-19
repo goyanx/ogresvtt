@@ -4,6 +4,7 @@ When validation fails, sends the errors back to the LLM with the original
 plan and asks it to produce corrected tool calls.
 """
 import logging
+import time
 from ai_dm.state import DMState
 from ai_dm.tools import TOOL_DEFINITIONS
 
@@ -29,8 +30,10 @@ async def reflect(state: DMState, llm_call) -> DMState:
     errors_text = "\n".join(f"- {e}" for e in state["validation_errors"])
     prompt = REFLECT_PROMPT.format(errors=errors_text, game_state=state["game_state"])
     messages = [{"role": "user", "content": prompt}]
+    t0 = time.perf_counter()
     response = await llm_call(messages, tools=TOOL_DEFINITIONS)
+    duration_ms = (time.perf_counter() - t0) * 1000
     message = response["choices"][0]["message"]
     tool_calls = message.get("tool_calls") or []
-    logger.info("reflect produced tool_calls=%s", len(tool_calls))
+    logger.info("reflect llm_duration_ms=%.0f produced tool_calls=%s", duration_ms, len(tool_calls))
     return {**state, "tool_calls": tool_calls, "retry_count": state["retry_count"] + 1}

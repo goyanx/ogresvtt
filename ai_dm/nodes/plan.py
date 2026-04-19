@@ -12,6 +12,7 @@ Loop (max MAX_QUERY_ROUNDS iterations):
 """
 import json
 import logging
+import time
 from ai_dm.state import DMState
 from ai_dm.tools import TOOL_DEFINITIONS, QUERY_TOOLS
 from ai_dm.query_executor import execute_query_tool
@@ -42,7 +43,9 @@ async def plan(state: DMState, llm_call) -> DMState:
     content = ""
     for round_idx in range(MAX_QUERY_ROUNDS):
         logger.info("plan round=%s", round_idx + 1)
+        t0 = time.perf_counter()
         response = await llm_call(messages, tools=TOOL_DEFINITIONS)
+        logger.info("plan round=%s llm_duration_ms=%.0f", round_idx + 1, (time.perf_counter() - t0) * 1000)
         message = response["choices"][0]["message"]
         tool_calls = message.get("tool_calls") or []
         content = message.get("content") or ""

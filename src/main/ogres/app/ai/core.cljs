@@ -88,7 +88,8 @@
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
   [conn dispatch config idb-read history set-history set-pending]
   (set-pending true)
-  (let [token-vision-pull
+  (let [t0             (js/performance.now)
+        token-vision-pull
         [:db/id :token/flags :token/light :token/size :object/point]
         db         @conn
         user       (ds/entity db [:db/ident :user])
@@ -99,35 +100,54 @@
         all-tokens (when (:scene/tokens scene)
                      (ds/pull-many db token-vision-pull
                        (map :db/id (:scene/tokens scene))))
+        token-count (count all-tokens)
+        _          (js/console.log (str "[AI DM] turn start — tokens:" token-count
+                                        " vision:" (:vision-enabled config)
+                                        " backend:" (name (:backend config))))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
         terrain-p  (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-                     (vision/detect-all-terrain! all-tokens
-                       {:idb-read   idb-read
-                        :endpoint   (:endpoint config)
-                        :model      (or (:vision-model config) "qwen3-vl:8b")
-                        :image-hash image-hash
-                        :scene-gs   gs
-                        :origin-x   (if origin (.-x origin) 0)
-                        :origin-y   (if origin (.-y origin) 0)})
+                     (do
+                       (js/console.log "[AI DM] terrain detection start")
+                       (-> (vision/detect-all-terrain! all-tokens
+                             {:idb-read   idb-read
+                              :endpoint   (:endpoint config)
+                              :model      (or (:vision-model config) "qwen3-vl:8b")
+                              :image-hash image-hash
+                              :scene-gs   gs
+                              :origin-x   (if origin (.-x origin) 0)
+                              :origin-y   (if origin (.-y origin) 0)})
+                           (.then (fn [r]
+                                    (js/console.log (str "[AI DM] terrain done "
+                                                         (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                                    r))))
                      (js/Promise.resolve {}))
         visibility-p
         (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-          (vision/detect-local-visibility! all-tokens
-            {:idb-read   idb-read
-             :endpoint   (:endpoint config)
-             :model      (or (:vision-model config) "qwen3-vl:8b")
-             :image-hash image-hash
-             :scene-gs   gs
-             :origin-x   (if origin (.-x origin) 0)
-             :origin-y   (if origin (.-y origin) 0)
-             :default-squares 10})
+          (do
+            (js/console.log "[AI DM] visibility detection start")
+            (-> (vision/detect-local-visibility! all-tokens
+                  {:idb-read   idb-read
+                   :endpoint   (:endpoint config)
+                   :model      (or (:vision-model config) "qwen3-vl:8b")
+                   :image-hash image-hash
+                   :scene-gs   gs
+                   :origin-x   (if origin (.-x origin) 0)
+                   :origin-y   (if origin (.-y origin) 0)
+                   :default-squares 10})
+                (.then (fn [r]
+                         (js/console.log (str "[AI DM] visibility done "
+                                              (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                         r))))
           (js/Promise.resolve {}))]
     (-> (js/Promise.all #js [terrain-p visibility-p])
         (.then
           (fn [results]
             (let [terrain-map    (or (aget results 0) {})
                   visibility-map (or (aget results 1) {})
+                  _              (js/console.log (str "[AI DM] vision complete "
+                                                      (.toFixed (- (js/performance.now) t0) 0)
+                                                      "ms — calling " (name (:backend config))))
                   game-state     (prompt/serialize-game-state db terrain-map visibility-map)
                   system-msg {:role "system"
                               :content (prompt/build-system-prompt
@@ -136,6 +156,8 @@
               (call-backend config messages))))
         (.then
           (fn [response]
+            (js/console.log (str "[AI DM] backend response "
+                                 (.toFixed (- (js/performance.now) t0) 0) "ms"))
             (let [choice     (first (:choices response))
                   message    (:message choice)
                   tool-calls (:tool_calls message)
@@ -155,6 +177,7 @@
                     (dispatch :narration/append fallback "ai")
                     (speak! fallback))))
               (when (seq tool-calls)
+                (js/console.log (str "[AI DM] dispatching " (count tool-calls) " tool calls"))
                 (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
                   {:on-narrate speak!}))
               (set-history
@@ -163,11 +186,15 @@
                     (vec (take-last 20 h))))))))
         (.catch
           (fn [err]
-            (js/console.error "AI DM turn failed:" err)
+            (js/console.error (str "[AI DM] turn failed at "
+                                   (.toFixed (- (js/performance.now) t0) 0) "ms") err)
             (dispatch :narration/append
               (str "[AI DM Error] " (.-message err)) "system")))
         (.finally
-          (fn [] (set-pending false))))))
+          (fn []
+            (js/console.log (str "[AI DM] turn complete "
+                                 (.toFixed (- (js/performance.now) t0) 0) "ms"))
+            (set-pending false))))))
 
 ;; ---------------------------------------------------------------------------
 ;; React provider + timer
