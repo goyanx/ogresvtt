@@ -91,6 +91,7 @@
         scene      (-> user :user/camera :camera/scene)
         image-hash (-> scene :scene/image :image/hash)
         gs         (or (:scene/grid-size scene) grid-size)
+        origin     (:scene/grid-origin scene)
         all-tokens (when (:scene/tokens scene)
                      (ds/pull-many db [:db/id :object/point]
                        (map :db/id (:scene/tokens scene))))
@@ -100,9 +101,11 @@
                      (vision/detect-all-terrain! all-tokens
                        {:idb-read   idb-read
                         :endpoint   (:endpoint config)
-                        :model      (or (:vision-model config) "qwen2.5-vl:7b")
+                        :model      (or (:vision-model config) "qwen3-vl:8b")
                         :image-hash image-hash
-                        :grid-size  gs})
+                        :scene-gs   gs
+                        :origin-x   (if origin (.-x origin) 0)
+                        :origin-y   (if origin (.-y origin) 0)})
                      (js/Promise.resolve {}))]
     (-> terrain-p
         (.then
