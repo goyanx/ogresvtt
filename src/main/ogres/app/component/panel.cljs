@@ -1,8 +1,10 @@
 (ns ogres.app.component.panel
   (:require [ogres.app.component :refer [icon]]
+            [ogres.app.component.panel-ai-dm :as ai-dm]
             [ogres.app.component.panel-data :as data]
             [ogres.app.component.panel-initiative :as initiative]
             [ogres.app.component.panel-lobby :as lobby]
+            [ogres.app.component.panel-narration :as narration]
             [ogres.app.component.panel-scene :as scene]
             [ogres.app.component.panel-tokens :as tokens]
             [ogres.app.component.panel-props :as props]
@@ -41,11 +43,13 @@
    :lobby      {:icon "people-fill" :label "Online options"}
    :scene      {:icon "easel" :label "Scene options"}
    :tokens     {:icon "person-circle" :label "Token images"}
-   :props      {:icon "images" :label "Prop images"}})
+   :props      {:icon "images" :label "Prop images"}
+   :ai-dm      {:icon "magic" :label "AI Dungeon Master"}
+   :narration  {:icon "fonts" :label "DM Narration"}})
 
 (def ^:private forms
-  {true  [:tokens :scene :props :initiative :lobby :data]
-   false [:tokens :initiative :lobby]})
+  {true  [:tokens :scene :props :initiative :ai-dm :narration :lobby :data]
+   false [:tokens :initiative :narration :lobby]})
 
 (def ^:private components
   {:data       {:form data/panel}
@@ -53,7 +57,9 @@
    :lobby      {:form lobby/panel :footer lobby/actions}
    :scene      {:form scene/panel}
    :tokens     {:form tokens/panel :footer tokens/actions}
-   :props      {:form props/panel :footer props/actions}})
+   :props      {:form props/panel :footer props/actions}
+   :ai-dm      {:form ai-dm/panel :footer ai-dm/actions}
+   :narration  {:form narration/panel :footer narration/actions}})
 
 (defui ^:memo panel []
   (let [dispatch (hooks/use-dispatch)
