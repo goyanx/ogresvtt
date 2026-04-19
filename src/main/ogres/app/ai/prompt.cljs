@@ -13,14 +13,16 @@
    :initiative/health
    :initiative/suffix])
 
-(defn- format-token [t]
-  (let [pt (:object/point t)]
+(defn- format-token [t terrain-map]
+  (let [pt      (:object/point t)
+        terrain (when terrain-map (get terrain-map (:db/id t)))]
     (str "  - id: " (:db/id t)
          ", label: \"" (or (:token/label t) "Unknown") "\""
          (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
          (when (:token/size t) (str ", size: " (:token/size t) "ft"))
          (when (seq (:token/flags t))
            (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
+         (when terrain (str ", terrain: \"" terrain "\""))
          "\n")))
 
 (defn- player-token? [t]
@@ -28,8 +30,10 @@
 
 (defn serialize-game-state
   "Serializes the current scene's game state from the DataScript database
-   into a text block suitable for an LLM system prompt."
-  [db]
+   into a text block suitable for an LLM system prompt.
+   Optional terrain-map is a map of token-id → terrain description string."
+  ([db] (serialize-game-state db nil))
+  ([db terrain-map]
   (let [user  (ds/entity db [:db/ident :user])
         scene (-> user :user/camera :camera/scene)
         sid   (:db/id scene)
@@ -45,11 +49,11 @@
          "GRID SIZE: " gs "px per tile (each tile = 5 feet)\n"
          "\nPLAYER TOKENS (do NOT move or remove these):\n"
          (if (seq players)
-           (apply str (map format-token players))
+           (apply str (map #(format-token % terrain-map) players))
            "  (none)\n")
          "\nNPC/MONSTER TOKENS (you control these):\n"
          (if (seq npcs)
-           (apply str (map format-token npcs))
+           (apply str (map #(format-token % terrain-map) npcs))
            "  (none)\n")
          (when (seq initiative)
            (str
@@ -64,7 +68,7 @@
                      (when (seq (:token/flags t))
                        (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
                      "\n")))
-            "ROUND: " (or rounds 0) "\n")))))))
+            "ROUND: " (or rounds 0) "\n"))))))))
 
 (defn build-system-prompt
   "Builds the full system prompt for the AI DM, combining the scenario

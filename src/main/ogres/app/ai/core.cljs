@@ -7,9 +7,11 @@
             [ogres.app.ai.backends.ollama :as ollama]
             [ogres.app.ai.backends.grok :as grok]
             [ogres.app.ai.backends.langgraph :as langgraph]
+            [ogres.app.ai.vision :as vision]
             [ogres.app.ai.voice :as voice]
             [ogres.app.const :refer [grid-size]]
             [ogres.app.hooks :as hooks]
+            [ogres.app.provider.idb :as idb]
             [ogres.app.provider.state :as state]
             [uix.core :as uix :refer [defui $]]))
 
@@ -18,17 +20,19 @@
 ;; ---------------------------------------------------------------------------
 
 (def default-config
-  {:enabled      false
-   :backend      :ollama
-   :endpoint     "http://localhost:11434"
-   :model        "qwen2.5:14b-instruct-q4_K_M"
-   :lg-endpoint  "http://localhost:8765"
-   :scenario     ""
-   :auto-approve true
-   :interval-ms  15000
-   :voice-enabled false
-   :voice-id      "bm_george"
-   :voice-speed   0.95})
+  {:enabled        false
+   :backend        :ollama
+   :endpoint       "http://localhost:11434"
+   :model          "qwen2.5:14b-instruct-q4_K_M"
+   :lg-endpoint    "http://localhost:8765"
+   :scenario       ""
+   :auto-approve   true
+   :interval-ms    15000
+   :voice-enabled  false
+   :voice-id       "bm_george"
+   :voice-speed    0.95
+   :vision-enabled false
+   :vision-model   "qwen2.5-vl:7b"})
 
 (defn load-config
   "Loads AI DM configuration from localStorage, merging with defaults."
@@ -80,20 +84,35 @@
 
 (defn run-turn!
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
-  [conn dispatch config history set-history set-pending]
+  [conn dispatch config idb-read history set-history set-pending]
   (set-pending true)
-  (let [db          @conn
-        game-state  (prompt/serialize-game-state db)
-        gs          (or (-> (ds/entity db [:db/ident :user])
-                            :user/camera :camera/scene :scene/grid-size)
-                        grid-size)
-        system-msg  {:role "system"
-                     :content (prompt/build-system-prompt
-                                (:scenario config) game-state gs)}
-        user-msg    {:role "user"
-                     :content "It is your turn. Review the game state and take appropriate actions."}
-        messages    (into [system-msg] (conj (vec history) user-msg))]
-    (-> (call-backend config messages)
+  (let [db         @conn
+        user       (ds/entity db [:db/ident :user])
+        scene      (-> user :user/camera :camera/scene)
+        image-hash (-> scene :scene/image :image/hash)
+        gs         (or (:scene/grid-size scene) grid-size)
+        all-tokens (when (:scene/tokens scene)
+                     (ds/pull-many db [:db/id :object/point]
+                       (map :db/id (:scene/tokens scene))))
+        user-msg   {:role "user"
+                    :content "It is your turn. Review the game state and take appropriate actions."}
+        terrain-p  (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+                     (vision/detect-all-terrain! all-tokens
+                       {:idb-read   idb-read
+                        :endpoint   (:endpoint config)
+                        :model      (or (:vision-model config) "qwen2.5-vl:7b")
+                        :image-hash image-hash
+                        :grid-size  gs})
+                     (js/Promise.resolve {}))]
+    (-> terrain-p
+        (.then
+          (fn [terrain-map]
+            (let [game-state (prompt/serialize-game-state db terrain-map)
+                  system-msg {:role "system"
+                              :content (prompt/build-system-prompt
+                                         (:scenario config) game-state gs)}
+                  messages   (into [system-msg] (conj (vec history) user-msg))]
+              (call-backend config messages))))
         (.then
           (fn [response]
             (let [choice     (first (:choices response))
@@ -134,6 +153,7 @@
   [{:keys [children]}]
   (let [conn                      (uix/use-context state/context)
         dispatch                  (hooks/use-dispatch)
+        idb-read                  (idb/use-reader "images")
         [config set-config]       (uix/use-state load-config)
         [pending set-pending]     (uix/use-state false)
         [history set-history]     (uix/use-state [])
@@ -151,8 +171,8 @@
         (uix/use-callback
           (fn []
             (when-not pending
-              (run-turn! conn dispatch config history set-history set-pending)))
-          [conn dispatch config history pending])
+              (run-turn! conn dispatch config idb-read history set-history set-pending)))
+          [conn dispatch config idb-read history pending])
 
         send-message
         (uix/use-callback
@@ -162,8 +182,8 @@
               (let [user-msg {:role "user" :content text}
                     history' (vec (take-last 20 (conj history user-msg)))]
                 (set-history history')
-                (run-turn! conn dispatch config history' set-history set-pending))))
-          [conn dispatch config history pending])
+                (run-turn! conn dispatch config idb-read history' set-history set-pending))))
+          [conn dispatch config idb-read history pending])
 
         ctx-value
         (uix/use-memo

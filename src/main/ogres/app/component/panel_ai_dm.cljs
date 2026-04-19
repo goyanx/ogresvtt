@@ -20,7 +20,8 @@
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
             {:keys [enabled backend endpoint model scenario auto-approve interval-ms
-                    voice-enabled voice-id voice-speed]} config]
+                    voice-enabled voice-id voice-speed
+                    vision-enabled vision-model]} config]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")
@@ -133,6 +134,22 @@
                             :on-change #(update-config
                                           (fn [c] (assoc c :voice-speed
                                                     (js/parseFloat (.. % -target -value)))))})))
+
+            ;; Vision terrain detection
+            ($ field-row {:label "Terrain vision"}
+              ($ :input {:type "checkbox"
+                         :checked (boolean vision-enabled)
+                         :on-change #(update-config
+                                       (fn [c] (assoc c :vision-enabled (not vision-enabled))))}))
+
+            (when vision-enabled
+              ($ field-row {:label "Vision model"}
+                ($ :input.text
+                  {:type "text"
+                   :value (or vision-model "")
+                   :placeholder "qwen2.5-vl:7b"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :vision-model (.. % -target -value))))})))
 
             ;; Interval
             ($ field-row {:label (str "Turn interval (" (/ interval-ms 1000) "s)")}
