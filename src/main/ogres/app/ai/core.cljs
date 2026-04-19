@@ -115,7 +115,9 @@
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
   [conn dispatch config idb-read history set-history set-pending]
   (set-pending true)
-  (let [t0             (js/performance.now)
+  (let [t0     (js/performance.now)
+        timing #js {:tokens 0 :terrain "-" :vis "-" :llm "-" :tools 0 :total "-"}
+        ms!    (fn [k] (.toFixed (- (js/performance.now) t0) 0))
         token-vision-pull
         [:db/id :token/flags :token/light :token/size :object/point]
         db         @conn
@@ -127,10 +129,7 @@
         all-tokens (when (:scene/tokens scene)
                      (ds/pull-many db token-vision-pull
                        (map :db/id (:scene/tokens scene))))
-        token-count (count all-tokens)
-        _          (js/console.log (str "[AI DM] turn start — tokens:" token-count
-                                        " vision:" (:vision-enabled config)
-                                        " backend:" (name (:backend config))))
+        _          (aset timing "tokens" (count all-tokens))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
         vision-opts {:idb-read   idb-read
@@ -143,40 +142,33 @@
         terrain-p
         (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
           (if-let [cached (get @terrain-cache image-hash)]
-            (do (js/console.log "[AI DM] terrain cache hit") (js/Promise.resolve cached))
-            (do
-              (js/console.log "[AI DM] terrain detection start")
+            (do (aset timing "terrain" "hit") (js/Promise.resolve cached))
+            (let [t1 (js/performance.now)]
               (-> (vision/detect-all-terrain! all-tokens vision-opts)
                   (.then (fn [r]
                            (swap! terrain-cache assoc image-hash r)
-                           (js/console.log (str "[AI DM] terrain done "
-                                                (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                           (aset timing "terrain" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
                            r)))))
-          (js/Promise.resolve {}))
+          (do (aset timing "terrain" "off") (js/Promise.resolve {})))
         vis-key      (when (seq all-tokens) (token-pos-key all-tokens))
         visibility-p
         (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
           (if-let [cached (get @visibility-cache vis-key)]
-            (do (js/console.log "[AI DM] visibility cache hit") (js/Promise.resolve cached))
-            (do
-              (js/console.log "[AI DM] visibility detection start")
+            (do (aset timing "vis" "hit") (js/Promise.resolve cached))
+            (let [t1 (js/performance.now)]
               (-> (vision/detect-local-visibility! all-tokens
                     (assoc vision-opts :default-squares 10 :dst-px 448))
                   (.then (fn [r]
                            (swap! visibility-cache assoc vis-key r)
                            (trim-visibility-cache!)
-                           (js/console.log (str "[AI DM] visibility done "
-                                                (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                           (aset timing "vis" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
                            r)))))
-          (js/Promise.resolve {}))]
+          (do (aset timing "vis" "off") (js/Promise.resolve {})))]
     (-> (js/Promise.all #js [terrain-p visibility-p])
         (.then
           (fn [results]
             (let [terrain-map    (or (aget results 0) {})
                   visibility-map (or (aget results 1) {})
-                  _              (js/console.log (str "[AI DM] vision complete "
-                                                      (.toFixed (- (js/performance.now) t0) 0)
-                                                      "ms — calling " (name (:backend config))))
                   game-state     (prompt/serialize-game-state db terrain-map visibility-map)
                   system-msg {:role "system"
                               :content (prompt/build-system-prompt
@@ -185,8 +177,7 @@
               (call-backend config messages))))
         (.then
           (fn [response]
-            (js/console.log (str "[AI DM] backend response "
-                                 (.toFixed (- (js/performance.now) t0) 0) "ms"))
+            (aset timing "llm" (str (ms! nil) "ms"))
             (let [choice     (first (:choices response))
                   message    (:message choice)
                   tool-calls (:tool_calls message)
@@ -197,6 +188,7 @@
                                    {:sidecar-url (:lg-endpoint config)
                                     :voice       (:voice-id config)
                                     :speed       (:voice-speed config)})))]
+              (aset timing "tools" (count tool-calls))
               (when (and (seq content) (empty? tool-calls))
                 (if-let [narration (ai-text/narrative-only content)]
                   (do
@@ -206,7 +198,6 @@
                     (dispatch :narration/append fallback "ai")
                     (speak! fallback))))
               (when (seq tool-calls)
-                (js/console.log (str "[AI DM] dispatching " (count tool-calls) " tool calls"))
                 (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
                   {:on-narrate speak!}))
               (set-history
@@ -215,14 +206,20 @@
                     (vec (take-last 20 h))))))))
         (.catch
           (fn [err]
-            (js/console.error (str "[AI DM] turn failed at "
-                                   (.toFixed (- (js/performance.now) t0) 0) "ms") err)
+            (aset timing "total" "ERR")
+            (js/console.error "[AI DM] turn failed" err)
             (dispatch :narration/append
               (str "[AI DM Error] " (.-message err)) "system")))
         (.finally
           (fn []
-            (js/console.log (str "[AI DM] turn complete "
-                                 (.toFixed (- (js/performance.now) t0) 0) "ms"))
+            (aset timing "total" (str (ms! nil) "ms"))
+            (js/console.log
+              (str "[AI DM] tokens:" (aget timing "tokens")
+                   " terrain:" (aget timing "terrain")
+                   " vis:" (aget timing "vis")
+                   " llm:" (aget timing "llm")
+                   " tools:" (aget timing "tools")
+                   " total:" (aget timing "total")))
             (set-pending false))))))
 
 ;; ---------------------------------------------------------------------------
