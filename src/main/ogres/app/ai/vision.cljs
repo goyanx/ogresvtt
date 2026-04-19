@@ -135,6 +135,7 @@
         url    (str endpoint "/api/chat")
         body   (clj->js {:model    model
                          :stream   false
+                         :think    false
                          :format   "json"
                          :messages [{:role    "user"
                                       :content prompt
@@ -186,6 +187,7 @@
         url    (str endpoint "/api/chat")
         body   (clj->js {:model    model
                          :stream   false
+                         :think    false
                          :format   "json"
                          :messages [{:role    "user"
                                      :content prompt
