@@ -5,7 +5,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-async def chat_completion(endpoint: str, model: str, messages: list, tools: list) -> dict:
+async def chat_completion(messages: list, tools: list, *, endpoint: str, model: str) -> dict:
     url = f"{endpoint}/v1/chat/completions"
     payload = {"model": model, "messages": messages, "tools": tools, "stream": False}
     logger.info(

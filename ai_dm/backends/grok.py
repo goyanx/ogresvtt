@@ -5,7 +5,7 @@ GROK_URL = "https://api.x.ai/v1/chat/completions"
 logger = logging.getLogger(__name__)
 
 
-async def chat_completion(api_key: str, model: str, messages: list, tools: list) -> dict:
+async def chat_completion(messages: list, tools: list, *, api_key: str, model: str) -> dict:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"model": model, "messages": messages, "tools": tools, "stream": False}
     logger.info(
