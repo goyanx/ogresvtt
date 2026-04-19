@@ -118,6 +118,7 @@
   (let [t0     (js/performance.now)
         timing #js {:tokens 0 :terrain "-" :vis "-" :llm "-" :tools 0 :total "-"}
         ms!    (fn [k] (.toFixed (- (js/performance.now) t0) 0))
+        phase! (fn [s] (set-status s) (when (seq s) (js/console.log (str "[AI DM] " s))))
         token-vision-pull
         [:db/id :token/flags :token/light :token/size :object/point]
         db         @conn
@@ -131,10 +132,10 @@
                        (map :db/id (:scene/tokens scene))))
         _          (aset timing "tokens" (count all-tokens))
         vision-active? (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-        _          (set-status (if vision-active? "scanning the scene"
-                                 (case (:backend config)
-                                   :langgraph "planning the next move"
-                                   "deciding what happens")))
+        _          (phase! (if vision-active? "scanning the scene"
+                              (case (:backend config)
+                                :langgraph "planning the next move"
+                                "deciding what happens")))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
         vision-opts {:idb-read   idb-read
@@ -179,9 +180,9 @@
                               :content (prompt/build-system-prompt
                                          (:scenario config) game-state gs)}
                   messages   (into [system-msg] (conj (vec history) user-msg))]
-              (set-status (case (:backend config)
-                            :langgraph "planning the next move"
-                            "deciding what happens"))
+              (phase! (case (:backend config)
+                        :langgraph "planning the next move"
+                        "deciding what happens"))
               (call-backend config messages))))
         (.then
           (fn [response]
@@ -199,11 +200,11 @@
               (aset timing "tools" (count tool-calls))
               (if (seq tool-calls)
                 (do
-                  (set-status "taking action")
+                  (phase! "taking action")
                   (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
                     {:on-narrate speak!}))
                 (when (seq content)
-                  (set-status "narrating the scene")
+                  (phase! "narrating the scene")
                   (if-let [narration (ai-text/narrative-only content)]
                     (do
                       (dispatch :narration/append narration "ai")
