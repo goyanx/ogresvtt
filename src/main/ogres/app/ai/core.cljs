@@ -74,9 +74,10 @@
                  {:model    (:model config)
                   :messages messages})
     :langgraph (langgraph/chat-completion
-                 {:endpoint (:lg-endpoint config)
-                  :model    (:backend config)
-                  :messages messages})
+                 {:lg-endpoint  (:lg-endpoint config)
+                  :llm-endpoint (:endpoint config)
+                  :llm-model    (:model config)
+                  :messages     messages})
     (js/Promise.reject (js/Error. (str "Unknown backend: " (:backend config))))))
 
 ;; ---------------------------------------------------------------------------
