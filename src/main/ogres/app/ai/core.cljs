@@ -81,6 +81,33 @@
     (js/Promise.reject (js/Error. (str "Unknown backend: " (:backend config))))))
 
 ;; ---------------------------------------------------------------------------
+;; Vision caches
+;; ---------------------------------------------------------------------------
+
+;; Terrain is permanent — the map never changes. Cache forever by image-hash.
+(def ^:private terrain-cache (atom {}))
+
+;; Visibility depends on token positions. Key = sorted [id x y] tuples as string.
+(def ^:private visibility-cache (atom {}))
+
+(defn- token-pos-key [tokens]
+  (->> tokens
+       (keep (fn [{:keys [db/id object/point]}]
+               (when (and id point) [id (.-x point) (.-y point)])))
+       sort
+       str))
+
+(defn clear-vision-cache!
+  "Clears both vision caches. Call when switching scenes or maps."
+  []
+  (reset! terrain-cache {})
+  (reset! visibility-cache {}))
+
+(defn- trim-visibility-cache! []
+  (when (> (count @visibility-cache) 50)
+    (swap! visibility-cache #(into {} (take-last 30 %)))))
+
+;; ---------------------------------------------------------------------------
 ;; Turn execution
 ;; ---------------------------------------------------------------------------
 
@@ -106,39 +133,41 @@
                                         " backend:" (name (:backend config))))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
-        terrain-p  (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-                     (do
-                       (js/console.log "[AI DM] terrain detection start")
-                       (-> (vision/detect-all-terrain! all-tokens
-                             {:idb-read   idb-read
-                              :endpoint   (:endpoint config)
-                              :model      (or (:vision-model config) "qwen3-vl:8b")
-                              :image-hash image-hash
-                              :scene-gs   gs
-                              :origin-x   (if origin (.-x origin) 0)
-                              :origin-y   (if origin (.-y origin) 0)})
-                           (.then (fn [r]
-                                    (js/console.log (str "[AI DM] terrain done "
-                                                         (.toFixed (- (js/performance.now) t0) 0) "ms"))
-                                    r))))
-                     (js/Promise.resolve {}))
+        vision-opts {:idb-read   idb-read
+                     :endpoint   (:endpoint config)
+                     :model      (or (:vision-model config) "qwen3-vl:8b")
+                     :image-hash image-hash
+                     :scene-gs   gs
+                     :origin-x   (if origin (.-x origin) 0)
+                     :origin-y   (if origin (.-y origin) 0)}
+        terrain-p
+        (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+          (if-let [cached (get @terrain-cache image-hash)]
+            (do (js/console.log "[AI DM] terrain cache hit") (js/Promise.resolve cached))
+            (do
+              (js/console.log "[AI DM] terrain detection start")
+              (-> (vision/detect-all-terrain! all-tokens vision-opts)
+                  (.then (fn [r]
+                           (swap! terrain-cache assoc image-hash r)
+                           (js/console.log (str "[AI DM] terrain done "
+                                                (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                           r)))))
+          (js/Promise.resolve {}))
+        vis-key      (when (seq all-tokens) (token-pos-key all-tokens))
         visibility-p
         (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-          (do
-            (js/console.log "[AI DM] visibility detection start")
-            (-> (vision/detect-local-visibility! all-tokens
-                  {:idb-read   idb-read
-                   :endpoint   (:endpoint config)
-                   :model      (or (:vision-model config) "qwen3-vl:8b")
-                   :image-hash image-hash
-                   :scene-gs   gs
-                   :origin-x   (if origin (.-x origin) 0)
-                   :origin-y   (if origin (.-y origin) 0)
-                   :default-squares 10})
-                (.then (fn [r]
-                         (js/console.log (str "[AI DM] visibility done "
-                                              (.toFixed (- (js/performance.now) t0) 0) "ms"))
-                         r))))
+          (if-let [cached (get @visibility-cache vis-key)]
+            (do (js/console.log "[AI DM] visibility cache hit") (js/Promise.resolve cached))
+            (do
+              (js/console.log "[AI DM] visibility detection start")
+              (-> (vision/detect-local-visibility! all-tokens
+                    (assoc vision-opts :default-squares 10 :dst-px 448))
+                  (.then (fn [r]
+                           (swap! visibility-cache assoc vis-key r)
+                           (trim-visibility-cache!)
+                           (js/console.log (str "[AI DM] visibility done "
+                                                (.toFixed (- (js/performance.now) t0) 0) "ms"))
+                           r)))))
           (js/Promise.resolve {}))]
     (-> (js/Promise.all #js [terrain-p visibility-p])
         (.then
@@ -241,13 +270,14 @@
         ctx-value
         (uix/use-memo
           (fn []
-            {:config        config
-             :update-config update-config
-             :pending       pending
-             :history       history
-             :trigger-turn  trigger-turn
-             :send-message  send-message
-             :clear-history #(set-history [])})
+            {:config             config
+             :update-config      update-config
+             :pending            pending
+             :history            history
+             :trigger-turn       trigger-turn
+             :send-message       send-message
+             :clear-history      #(set-history [])
+             :clear-vision-cache clear-vision-cache!})
           [config update-config pending history trigger-turn send-message])]
 
     ;; Auto-run timer

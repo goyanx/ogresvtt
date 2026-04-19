@@ -176,8 +176,8 @@
         {:keys [user/host]} result
         ctx (uix/use-context ai/context)]
     (when (and host (some? ctx))
-      (let [{:keys [config pending trigger-turn clear-history]} ctx
-            {:keys [enabled]} config]
+      (let [{:keys [config pending trigger-turn clear-history clear-vision-cache]} ctx
+            {:keys [enabled vision-enabled]} config]
         ($ :<>
           ($ :button.button.button-neutral
             {:disabled (or (not enabled) pending)
@@ -186,4 +186,9 @@
             (if pending "Running..." "Run turn"))
           ($ :button.button.button-neutral
             {:on-click clear-history}
-            "Clear history"))))))
+            "Clear history")
+          (when vision-enabled
+            ($ :button.button.button-neutral
+              {:on-click clear-vision-cache
+               :title    "Forces terrain/visibility to re-query the vision model next turn"}
+              "Clear vision cache"))))))))
