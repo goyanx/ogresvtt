@@ -27,9 +27,8 @@ Running a TTRPG session requires a dedicated human DM who must juggle narrative,
 ## Non-Goals
 
 - Automated rules adjudication (spell lookup, condition tracking) — out of scope for v1.
-- AI-controlled player characters.
+- AI-controlled player characters (movement on player request is in scope; autonomous AI control of player tokens is not).
 - Fine-tuned or custom models — use off-the-shelf instruction-following models.
-- Voice synthesis or TTS narration.
 
 ---
 
@@ -45,6 +44,10 @@ Running a TTRPG session requires a dedicated human DM who must juggle narrative,
 | US-6 | Player | See narration from the AI DM in a chat panel | I stay immersed in the story |
 | US-7 | Player | See tokens move on the board as the AI DM acts | The encounter feels alive |
 | US-8 | Host | Set the AI DM to auto-approve mode | Fully automated sessions run without manual confirmation |
+| US-9 | Player | Type "I move north" and see my token move | My character's movement is reflected on the board instantly |
+| US-10 | Host | Enable voice narration | The DM reads narration aloud for immersive play |
+| US-11 | Host | Enable terrain vision detection | The DM knows whether tokens are on a wall, road, water, etc. |
+| US-12 | Player | Ask the DM a question in the narration box | I get an in-character response without breaking immersion |
 
 ---
 
@@ -56,14 +59,19 @@ A new "AI DM" section in the host toolbar (beside the existing scene/initiative 
 
 **Fields:**
 - **Enable AI DM** — toggle (default: off)
-- **Backend** — radio: `Ollama` | `Grok`
-- **Ollama endpoint** — text field, default `http://localhost:11434`
-- **Ollama model** — text field, default `llama3`
-- **Grok API key** — password field (stored in `localStorage`, never sent to OgresVTT server)
-- **Grok model** — dropdown: `grok-3`, `grok-3-mini`
-- **Scenario prompt** — textarea for campaign context / DM instructions (e.g., "Dark dungeon crawl, 4 level-3 adventurers, gothic horror tone")
-- **Action mode** — radio: `Auto-approve` | `Confirm each action`
-- **Frequency** — slider: how often the AI DM acts (in seconds, range 5–60, default 15)
+- **Backend** — select: `Ollama (local, direct)` | `Grok (xAI, direct)` | `LangGraph sidecar (multi-step)`
+- **Ollama endpoint** — text field, default `http://localhost:11434` (shown for Ollama backend)
+- **Sidecar URL** — text field, default `http://localhost:8765` (shown for LangGraph backend)
+- **Grok API key** — password field (stored in `localStorage`, never sent to OgresVTT server; shown for Grok backend)
+- **Model** — text field (e.g. `qwen3:14b`, `grok-3-mini`)
+- **Scenario prompt** — textarea for campaign context / DM instructions
+- **Auto-approve actions** — checkbox (default: on)
+- **Voice narration** — checkbox; enables Kokoro TTS via the LangGraph sidecar `/dm/speak` endpoint
+- **Voice** — select: George (British male) ★, Lewis, Adam, Echo, Sky, Nova, Emma
+- **Speed** — range slider 0.7×–1.3×
+- **Terrain vision** — checkbox; enables per-token terrain detection via a vision model
+- **Vision model** — text field, default `qwen3-vl:8b` (shown when terrain vision enabled)
+- **Turn interval** — slider: 5–60 seconds (default 15)
 
 ### 2. Game State Serialization
 
@@ -85,6 +93,8 @@ This context is prepended to the system prompt so the model always has a grounde
 Rather than prompting the model to return a freeform JSON blob, the AI DM uses the **OpenAI-compatible `tools` API** supported by both Ollama (tool-capable models: `llama3.1`, `mistral-nemo`, `qwen2.5`) and Grok. Each action in the action protocol is registered as a callable tool with a strict JSON Schema definition. The model selects and invokes tools natively — no brittle prompt-based JSON parsing required.
 
 #### Tool Definitions (sent with every request)
+
+Complete tool set — **bold** entries were added after initial design:
 
 ```json
 [
@@ -200,17 +210,19 @@ When the LLM responds, its message contains a `tool_calls` array. Each call is d
 
 If the model returns no `tool_calls`, the client sends a follow-up nudge message (`"Please call the narrate tool now."`) and retries once.
 
-**Supported tools (v1):**
+**Supported tools:**
 
-| Tool | Triggers OgresVTT Event |
-|------|------------------------|
-| `narrate` | `:narration/append` |
-| `move_token` | `:token/move` |
-| `spawn_token` | `:token/create` |
-| `remove_token` | `:token/remove` |
-| `update_hp` | `:token/update-hp` |
-| `roll_initiative` | `:initiative/roll` |
-| `advance_turn` | `:initiative/advance` |
+| Tool | Triggers OgresVTT Event | Notes |
+|------|------------------------|-------|
+| `narrate` | `:narration/append` | Always called once per turn |
+| `move_token` | `:objects/translate` | NPC/monster tokens only |
+| `spawn_token` | `:tokens/create` | |
+| `remove_token` | `:tokens/remove` | |
+| `update_hp` | `:initiative/update-hp` | |
+| `roll_initiative` | `:initiative/roll` | |
+| `advance_turn` | `:initiative/advance` | |
+| **`move_player_token`** | `:objects/translate` | Player-flagged tokens; use when player explicitly says they move |
+| **`list_tokens`** | *(query — no event)* | Returns token list; resolved inside sidecar or in query-feedback loop |
 
 ### 4. Action Execution Pipeline
 
@@ -253,7 +265,65 @@ Receive tool_calls from model response
 - Panel is scrollable; last 50 entries retained in session memory.
 - Narration is broadcast over the existing WebSocket room so all players see it.
 
-### 6. LLM Backend Integration
+### 6. Terrain Vision Detection
+
+Before each AI DM turn, if **Terrain vision** is enabled and the scene has a background image, the system:
+
+1. Pulls each token's pixel position from DataScript (`:object/point`).
+2. Crops a square region of the scene background image (3 × grid-size px by default) centred on each token using an offscreen Canvas.
+3. Encodes the crop as a JPEG base64 string and sends it to the Ollama `/api/chat` vision endpoint.
+4. Receives a 2–5 word terrain description (e.g. `"stone cave floor"`, `"wooden bridge"`, `"shallow water"`).
+5. Detections run concurrently via `Promise.all` and are assembled into a `token-id → terrain-string` map.
+6. The map is passed to `prompt/serialize-game-state` which appends `terrain: "..."` to each token's line in the game state prompt.
+
+**Vision prompt:**
+```
+You are analysing a small crop from a fantasy tabletop RPG map.
+Describe ONLY the terrain/surface type in 2-5 words.
+Examples: 'stone cave floor', 'dungeon wall', 'underground river', ...
+Do NOT mention any tokens, figures, or game pieces.
+```
+
+**Recommended vision model:** `qwen3-vl:8b` (runs in ~7 GB VRAM, spatial reasoning, OCR in 32 languages).
+
+Detection is silently skipped if:
+- Vision is disabled in config
+- No scene background image is loaded
+- The scene image is not in the local IndexedDB cache (e.g. remote player)
+
+### 7. Voice Narration
+
+When **Voice narration** is enabled, the DM speaks each narration text aloud via the LangGraph sidecar's `/dm/speak` endpoint, which uses [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) TTS (82M params, CPU-capable).
+
+- Audio clips are queued and played sequentially via the Web Audio API (no overlap).
+- Playback uses blob URLs released after the clip ends.
+- `voice/stop!` clears the queue (e.g. when host disables AI DM mid-session).
+
+**Available voices:** `bm_george` (British male ★), `bm_lewis`, `am_adam`, `am_echo`, `af_sky`, `af_nova`, `bf_emma`.
+
+### 8. Two-Way Chat & Player Movement
+
+The narration panel input box has two modes depending on whether the AI DM is active:
+
+| AI DM state | Input behaviour |
+|-------------|----------------|
+| Disabled | Broadcasts plain host narration to all players |
+| Enabled | Sends message to the DM as a user turn; DM responds immediately |
+
+When a player message contains a movement intent (`I move north`, `I go east 2 squares`, `run to the door`), the AI DM calls `move_player_token` to shift the player's token on the board and narrates the result.
+
+**Supported directions:** north, south, east, west, northeast, northwest, southeast, southwest.
+
+### 9. LLM Backend Integration
+
+#### Recommended Models
+
+| Role | Model | Notes |
+|------|-------|-------|
+| AI DM (tool calling) | `qwen3:14b` | Outperforms Qwen2.5-14B; ~11 GB at Q4_K_M |
+| Terrain vision | `qwen3-vl:8b` | Spatial reasoning, 32-language OCR; ~7 GB |
+
+Both fit concurrently on 2× 12 GB VRAM (24 GB total).
 
 #### Ollama
 
@@ -305,35 +375,38 @@ RESPONSE SCHEMA:
 ```
 src/main/ogres/app/
 ├── ai/
-│   ├── core.cljs          # AI DM state machine, timer loop, orchestration
-│   ├── prompt.cljs        # Game state → prompt serialization
-│   ├── tools.cljs         # OpenAI tool definitions (mirrors ai_dm/tools.py)
-│   ├── tool_dispatch.cljs # tool_call name → OgresVTT event dispatch
-│   ├── backends/
-│   │   ├── ollama.cljs    # Ollama HTTP client (direct mode)
-│   │   ├── grok.cljs      # Grok/xAI HTTP client (direct mode)
-│   │   └── langgraph.cljs # LangGraph sidecar HTTP client
-│   └── actions.cljs       # Validated tool calls → OgresVTT event dispatch
+│   ├── core.cljs           # AI DM state machine, timer loop, orchestration
+│   ├── prompt.cljs         # Game state → prompt serialization (terrain-aware)
+│   ├── tools.cljs          # OpenAI tool definitions (mirrors ai_dm/tools.py)
+│   ├── tool_dispatch.cljs  # tool_call name → OgresVTT event dispatch
+│   ├── vision.cljs         # Terrain detection via Ollama vision model
+│   ├── voice.cljs          # Kokoro TTS audio queue + playback
+│   └── backends/
+│       ├── ollama.cljs     # Ollama HTTP client (direct mode)
+│       ├── grok.cljs       # Grok/xAI HTTP client (direct mode)
+│       └── langgraph.cljs  # LangGraph sidecar HTTP client
 ├── component/
-│   ├── panel_ai_dm.cljs   # AI DM configuration panel
-│   └── panel_narration.cljs # Narration chat panel
+│   ├── panel_ai_dm.cljs    # AI DM configuration panel
+│   └── panel_narration.cljs # Narration chat + two-way DM chat
 
-ai_dm/                     # LangGraph sidecar (Python, optional)
-├── main.py                # FastAPI app, /dm/turn endpoint
-├── graph.py               # LangGraph StateGraph definition
+ai_dm/                      # LangGraph sidecar (Python, optional)
+├── main.py                 # FastAPI app, /dm/turn, /dm/speak, /dm/voices
+├── graph.py                # LangGraph StateGraph definition
 ├── nodes/
-│   ├── assess.py          # assess_situation node
-│   ├── plan.py            # plan_actions node
-│   ├── execute.py         # execute_tools node
-│   ├── validate.py        # validate node
-│   └── reflect.py         # reflect_retry node
-├── tools.py               # Tool schema definitions (source of truth)
+│   ├── assess.py           # assess_situation node
+│   ├── plan.py             # plan_actions node (with query-feedback loop)
+│   ├── execute.py          # execute_tools node
+│   ├── validate.py         # validate node
+│   └── reflect.py          # reflect_retry node
+├── tools.py                # Tool schema definitions (source of truth)
+├── tts.py                  # Kokoro TTS synthesis → WAV bytes
+├── query_executor.py       # Executes list_tokens queries against game_state text
 ├── backends/
-│   ├── ollama.py          # Ollama async HTTP client
-│   └── grok.py            # Grok/xAI async HTTP client
-├── state.py               # DMGraphState TypedDict
-├── Dockerfile             # Sidecar container image
-└── requirements.txt       # langgraph, langchain-core, fastapi, httpx
+│   ├── ollama.py           # Ollama async HTTP client
+│   └── grok.py             # Grok/xAI async HTTP client
+├── state.py                # DMGraphState TypedDict
+├── Dockerfile              # Sidecar container image
+└── requirements.txt        # langgraph, langchain-core, fastapi, httpx, kokoro, soundfile
 ```
 
 ### DataScript Schema Additions
@@ -528,49 +601,67 @@ The AI DM must only reference tokens by their DataScript `:db/id` (exposed in th
 
 ## Milestones
 
-| Milestone | Deliverables |
-|-----------|-------------|
-| **M1 — Foundation** | DataScript schema, AI DM config panel UI, settings persistence |
-| **M2 — Backends** | Ollama + Grok HTTP clients (direct mode), shared prompt builder |
-| **M3 — Tool Calling** | Tool definitions, tool_call dispatch → OgresVTT events, token ID validation |
-| **M4 — Narration Panel** | Narration UI component, WebSocket broadcast of narration entries |
-| **M5 — Confirm Flow** | Action preview modal, approve/edit/skip logic |
-| **M6 — LangGraph Sidecar** | FastAPI app, `assess → plan → execute → validate` graph, Docker image |
-| **M7 — LangGraph Integration** | `langgraph.cljs` client, orchestration toggle in config panel, sidecar ↔ client wiring |
-| **M8 — Polish & Docs** | Error states, loading indicators, Ollama setup docs, sidecar README, demo scenario |
+| Milestone | Deliverables | Status |
+|-----------|-------------|--------|
+| **M1 — Foundation** | DataScript schema, AI DM config panel UI, settings persistence | ✅ Done |
+| **M2 — Backends** | Ollama + Grok HTTP clients (direct mode), shared prompt builder | ✅ Done |
+| **M3 — Tool Calling** | Tool definitions, tool_call dispatch → OgresVTT events, token ID validation | ✅ Done |
+| **M4 — Narration Panel** | Narration UI, auto-scroll, two-way chat, "Thinking…" indicator | ✅ Done |
+| **M5 — LangGraph Sidecar** | FastAPI app, `assess → plan → execute → validate` graph, query-feedback loop | ✅ Done |
+| **M6 — LangGraph Integration** | `langgraph.cljs` client, orchestration toggle in config panel | ✅ Done |
+| **M7 — Voice Narration** | Kokoro TTS sidecar endpoint, audio queue, voice/speed config | ✅ Done |
+| **M8 — Player Tokens** | `list_tokens` query tool, `move_player_token` for player movement commands | ✅ Done |
+| **M9 — Terrain Vision** | Vision model terrain detection, canvas crop, prompt integration, UI config | ✅ Done |
+| **M10 — Polish & Docs** | README rewrite, error states, loading indicators, demo scenario | ✅ Done |
+| **M11 — Confirm Flow** | Action preview modal, approve/edit/skip logic | 🔲 Planned |
 
 ---
 
 ## Open Questions
 
-1. Should the AI DM maintain a turn-by-turn memory (conversation history) across turns, or use a stateless single-prompt approach per turn? Conversation history improves coherence but increases token cost with Grok.
+1. ~~Should the AI DM maintain turn-by-turn conversation history?~~ **Resolved:** Rolling 20-message history is kept in React state (trimmed with `take-last`).
 2. Should spawned tokens use a default placeholder image, or should the AI DM suggest image search keywords to present to the host?
 3. Should initiative rolling be handled by the AI DM or always left to the host to maintain player agency at encounter start?
-4. Can players "speak to" the AI DM via the narration panel, influencing its decisions?
+4. ~~Can players "speak to" the AI DM via the narration panel?~~ **Resolved:** Two-way chat implemented — narration input routes to the DM when AI DM is active.
+5. Should terrain vision results be cached per token position to avoid re-querying the vision model each turn when tokens haven't moved?
 
 ---
 
 ## Acceptance Criteria
 
 **Core**
-- [ ] Host can enable AI DM and select Ollama or Grok backend from the configuration panel.
-- [ ] AI DM produces narration text visible to all session participants.
-- [ ] AI DM can spawn, move, and remove tokens on the active scene via dispatched events.
-- [ ] All AI-dispatched token actions are broadcast via WebSocket and reflected on all clients.
-- [ ] In confirm mode, no action executes without host approval.
-- [ ] Grok API key is never transmitted to the OgresVTT server.
-- [ ] AI DM can be paused and resumed by the host without losing session state.
-- [ ] Narration panel is read-only for players; host can type additional narration.
+- [x] Host can enable AI DM and select Ollama, Grok, or LangGraph backend from the configuration panel.
+- [x] AI DM produces narration text visible to all session participants.
+- [x] AI DM can spawn, move, and remove tokens on the active scene via dispatched events.
+- [x] All AI-dispatched token actions are broadcast via WebSocket and reflected on all clients.
+- [ ] In confirm mode, no action executes without host approval. *(M11 — planned)*
+- [x] Grok API key is never transmitted to the OgresVTT server.
+- [x] AI DM can be paused and resumed by the host without losing session state.
+- [x] Narration panel supports two-way chat when AI DM is active; plain narration when disabled.
 
 **Tool Calling**
-- [ ] All board actions are triggered via LLM `tool_calls`, not freeform JSON parsing.
-- [ ] Tool arguments are validated against live DataScript state before dispatch; invalid `token_id` references are silently dropped (no crash).
-- [ ] If the model returns no `tool_calls`, a single retry nudge is sent before skipping the turn.
-- [ ] Tool results are appended to conversation history so subsequent turns have context.
+- [x] All board actions are triggered via LLM `tool_calls`, not freeform JSON parsing.
+- [x] Tool arguments are validated against live DataScript state before dispatch; invalid `token_id` references are silently dropped (no crash).
+- [x] `move_player_token` moves player-flagged tokens when the player explicitly requests movement.
+- [x] `list_tokens` query tool returns token data to the LLM mid-turn via the query-feedback loop.
+- [x] Tool results are appended to conversation history so subsequent turns have context.
 
 **LangGraph Sidecar**
-- [ ] The sidecar exposes `POST /dm/turn` and returns a validated tool call list.
-- [ ] The `assess → plan → execute → validate` graph runs end-to-end for a sample encounter.
-- [ ] Validation errors trigger `reflect_retry` up to 2 times before the turn is abandoned.
-- [ ] Host can switch between Direct and LangGraph orchestration modes without reloading.
-- [ ] Sidecar runs in Docker via `docker-compose` alongside the main OgresVTT services.
+- [x] The sidecar exposes `POST /dm/turn` and returns a validated tool call list.
+- [x] The `assess → plan → execute → validate` graph runs end-to-end for a sample encounter.
+- [x] Validation errors trigger `reflect_retry` up to 2 times before the turn is abandoned.
+- [x] `plan_actions` node runs a query-feedback loop (max 3 rounds) so the LLM can call `list_tokens` and receive real data before committing to actions.
+- [x] Host can switch between Direct and LangGraph orchestration modes without reloading.
+- [ ] Sidecar runs in Docker via `docker-compose` alongside the main OgresVTT services. *(Dockerfile present, compose wiring pending)*
+
+**Voice Narration**
+- [x] Sidecar exposes `POST /dm/speak` returning WAV audio from Kokoro TTS.
+- [x] Audio clips are queued and played sequentially with no overlap.
+- [x] Voice and speed are configurable in the AI DM panel.
+- [x] Voice narration is silently skipped if the sidecar is unreachable.
+
+**Terrain Vision**
+- [x] When enabled, the scene background image is cropped around each token and sent to the vision model.
+- [x] Terrain descriptions (e.g. `"stone cave floor"`) are appended to each token's game state entry.
+- [x] Detection runs concurrently for all tokens via `Promise.all`.
+- [x] Detection is silently skipped when vision is disabled, no image is loaded, or the sidecar is unreachable.

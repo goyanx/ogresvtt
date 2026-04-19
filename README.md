@@ -66,8 +66,11 @@
 - Narrates events to all players in real time via the DM Narration panel
 - Two-way chat — ask the DM questions and get in-character responses
 - Voice narration via Kokoro TTS (British male narrator by default)
+- **Terrain vision** — vision model detects what surface each token stands on (stone floor, dungeon wall, forest path, etc.) and includes it in the DM's context
+- Player movement — typing "I move north" shifts the player's token on the board
+- Query tools — DM can call `list_tokens` mid-turn to inspect who is on the board
 - Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
-- LangGraph mode adds assess → plan → validate → reflect-retry reasoning loop
+- LangGraph mode adds assess → plan → validate → reflect-retry reasoning loop with agentic query-feedback
 
 ---
 
@@ -124,7 +127,7 @@ The AI DM runs entirely in the host's browser. The LLM backend is your choice.
 
 1. Install [Ollama](https://ollama.com) and pull a tool-capable model:
    ```powershell
-   ollama pull qwen2.5:14b-instruct-q4_K_M
+   ollama pull qwen3:14b
    ```
 
 2. Start Ollama with CORS enabled (required for browser fetch):
@@ -136,7 +139,18 @@ The AI DM runs entirely in the host's browser. The LLM backend is your choice.
 3. In OgresVTT open the **wand icon** panel → set:
    - Backend: `Ollama (local, direct)`
    - Endpoint: `http://localhost:11434`
-   - Model: `qwen2.5:14b-instruct-q4_K_M`
+   - Model: `qwen3:14b`
+
+> **Recommended models (2× 12 GB VRAM / 24 GB total):**
+> | Role | Model | Pull command |
+> |------|-------|--------------|
+> | AI DM (tool calling) | `qwen3:14b` | `ollama pull qwen3:14b` |
+> | Terrain vision | `qwen3-vl:8b` | `ollama pull qwen3-vl:8b` |
+>
+> Qwen3-14B outperforms Qwen2.5-14B across all benchmarks and fits in ~11 GB at Q4_K_M.  
+> Both models run concurrently with ~19 GB total — well within 24 GB.
+>
+> **Disable thinking mode** for faster turns — add `/no_think` to the model name or set the model to `qwen3:14b` with the system prompt already containing `\nThink briefly.` Qwen3 defaults to extended chain-of-thought which can add latency.
 
 ### Option B — Grok xAI (cloud)
 
@@ -173,6 +187,21 @@ On Windows, espeak-ng is needed for phonemization. Install it from the
 Once the sidecar is running, enable **Voice narration** in the AI DM panel and select a voice.
 **George (British male)** is the recommended dungeon master voice.
 
+### Terrain Vision (optional)
+
+The AI DM can detect what terrain each token is standing on by sending a cropped region of the map to a vision model. This enriches its narration and tactics — a goblin on a "stone bridge" behaves differently from one on "open grassland".
+
+1. Pull the vision model:
+   ```powershell
+   ollama pull qwen3-vl:8b
+   ```
+
+2. In the AI DM panel, enable **Terrain vision** and set the Vision model to `qwen3-vl:8b`
+
+3. Make sure your scene has a background map image — terrain detection is skipped if no image is loaded
+
+The detection runs concurrently for all tokens before each DM turn. Results appear in the game state prompt as `terrain: "stone cave floor"` per token.
+
 ---
 
 ## Using the AI Dungeon Master
@@ -197,6 +226,10 @@ With the AI DM enabled, the narration panel input becomes a two-way chat:
 - Type a message and click **Ask** — your message is added to the conversation and the DM responds immediately
 - When disabled the input broadcasts plain host narration to all players
 
+### Player Movement
+
+When the AI DM is active and you type a movement command in the narration box (e.g. `I move north`, `I go east 2 squares`), the DM will shift your player token on the board in that direction and narrate the result. Compass directions supported: north, south, east, west, northeast, northwest, southeast, southwest.
+
 ### Panel Reference
 
 | Icon | Panel | Purpose |
@@ -217,13 +250,15 @@ With the AI DM enabled, the narration panel input becomes a two-way chat:
 | **Enable AI DM** | Activates the AI DM |
 | **Backend** | Ollama / Grok / LangGraph sidecar |
 | **Endpoint / Sidecar URL** | URL of your local Ollama or LangGraph server |
-| **Model** | LLM model name (`qwen2.5:14b-instruct-q4_K_M` recommended) |
+| **Model** | LLM model name (`qwen3:14b` recommended) |
 | **Scenario** | Free-text campaign context injected into every system prompt |
 | **Auto-approve** | Run turns automatically on a timer |
 | **Turn interval** | How often the DM acts (5 – 60 seconds) |
-| **Voice narration** | Speak narration aloud via Kokoro TTS |
+| **Voice narration** | Speak narration aloud via Kokoro TTS (requires sidecar) |
 | **Voice** | TTS voice character (George British male recommended) |
 | **Speed** | Narration speaking rate (0.95× = slightly slower, more dramatic) |
+| **Terrain vision** | Detect surface type under each token via a vision model |
+| **Vision model** | Vision model name (`qwen3-vl:8b` recommended) |
 
 ---
 
