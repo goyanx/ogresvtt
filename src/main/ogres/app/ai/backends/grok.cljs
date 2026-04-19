@@ -7,11 +7,14 @@
   "Sends a chat completion request to the Grok (xAI) API. The API key
    is read from localStorage and never leaves the browser.
    Returns a js/Promise resolving to the parsed response map."
-  [{:keys [model messages]}]
+  [{:keys [model max-output-tokens messages]}]
   (let [api-key (.getItem js/localStorage "ai-dm-api-key")
-        body    (clj->js {:model    model
-                          :messages messages
-                          :tools    tools/tool-definitions})]
+        body    (clj->js
+                  (cond-> {:model    model
+                           :messages messages
+                           :tools    tools/tool-definitions}
+                    (and (number? max-output-tokens) (pos? max-output-tokens))
+                    (assoc :max_tokens max-output-tokens)))]
     (when-not (seq api-key)
       (throw (js/Error. "Grok API key not set. Configure it in the AI DM panel.")))
     (-> (js/fetch api-url

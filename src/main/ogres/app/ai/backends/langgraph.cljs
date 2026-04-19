@@ -7,7 +7,7 @@
   "Sends a turn request to the LangGraph sidecar.
    Returns a js/Promise that resolves to an OpenAI-compatible response map
    so the existing tool-dispatch pipeline works unchanged."
-  [{:keys [lg-endpoint llm-endpoint llm-model messages]}]
+  [{:keys [lg-endpoint llm-endpoint llm-model llm-max-output-tokens messages]}]
   (let [;; Reconstruct scenario + game_state from message history.
         ;; The sidecar expects them split out for its graph nodes.
         system-msg  (first (filter #(= (:role %) "system") messages))
@@ -18,13 +18,16 @@
         game-state  (second (re-find #"CURRENT GAME STATE:\n([\s\S]*)$" system-text))
         api-key     (.getItem js/localStorage "ai-dm-api-key")
         url         (str lg-endpoint "/dm/turn")
-        body        (clj->js {:backend    "ollama"
+        body        (clj->js
+                      (cond-> {:backend    "ollama"
                                :endpoint   (or llm-endpoint "http://localhost:11434")
                                :model      (or llm-model "qwen3:14b")
                                :api_key    (or api-key "")
                                :scenario   (or scenario "")
                                :game_state (or game-state "")
-                               :history    history})]
+                               :history    history}
+                        (and (number? llm-max-output-tokens) (pos? llm-max-output-tokens))
+                        (assoc :max_output_tokens llm-max-output-tokens)))]
     (-> (js/fetch url
           #js {:method  "POST"
                :headers #js {"Content-Type" "application/json"}

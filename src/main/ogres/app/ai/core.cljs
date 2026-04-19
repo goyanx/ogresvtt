@@ -25,6 +25,7 @@
    :backend        :ollama
    :endpoint       "http://localhost:11434"
    :model          "qwen2.5:14b-instruct-q4_K_M"
+   :max-output-tokens nil
    :lg-endpoint    "http://localhost:8765"
    :scenario       ""
    :auto-approve   true
@@ -68,16 +69,19 @@
   (case (:backend config)
     :ollama    (ollama/chat-completion
                  {:endpoint (:endpoint config)
-                  :model    (:model config)
-                  :messages messages})
+                   :model    (:model config)
+                   :max-output-tokens (:max-output-tokens config)
+                   :messages messages})
     :grok      (grok/chat-completion
                  {:model    (:model config)
-                  :messages messages})
+                   :max-output-tokens (:max-output-tokens config)
+                   :messages messages})
     :langgraph (langgraph/chat-completion
                  {:lg-endpoint  (:lg-endpoint config)
-                  :llm-endpoint (:endpoint config)
-                  :llm-model    (:model config)
-                  :messages     messages})
+                   :llm-endpoint (:endpoint config)
+                   :llm-model    (:model config)
+                   :llm-max-output-tokens (:max-output-tokens config)
+                   :messages     messages})
     (js/Promise.reject (js/Error. (str "Unknown backend: " (:backend config))))))
 
 ;; ---------------------------------------------------------------------------

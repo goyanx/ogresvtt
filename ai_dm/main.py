@@ -79,6 +79,7 @@ class TurnRequest(BaseModel):
     backend: str = "ollama"
     endpoint: str = "http://localhost:11434"
     model: str = "qwen2.5:14b-instruct-q4_K_M"
+    max_output_tokens: int | None = None
     api_key: str = ""
     scenario: str = ""
     game_state: str = ""
@@ -95,22 +96,29 @@ class TurnResponse(BaseModel):
 @app.post("/dm/turn", response_model=TurnResponse)
 async def dm_turn(req: TurnRequest):
     logger.info(
-        "dm_turn start backend=%s model=%s endpoint=%s history_count=%s game_state_chars=%s",
+        "dm_turn start backend=%s model=%s endpoint=%s max_output_tokens=%s history_count=%s game_state_chars=%s",
         req.backend,
         req.model,
         req.endpoint,
+        req.max_output_tokens,
         len(req.history or []),
         len(req.game_state or ""),
     )
     if req.backend == "ollama":
         llm_call = functools.partial(
-            ollama.chat_completion, endpoint=req.endpoint, model=req.model
+            ollama.chat_completion,
+            endpoint=req.endpoint,
+            model=req.model,
+            max_output_tokens=req.max_output_tokens,
         )
     elif req.backend == "grok":
         if not req.api_key:
             raise HTTPException(status_code=400, detail="api_key required for grok backend")
         llm_call = functools.partial(
-            grok.chat_completion, api_key=req.api_key, model=req.model
+            grok.chat_completion,
+            api_key=req.api_key,
+            model=req.model,
+            max_output_tokens=req.max_output_tokens,
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unknown backend: {req.backend}")

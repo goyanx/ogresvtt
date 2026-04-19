@@ -5,13 +5,23 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-async def chat_completion(messages: list, tools: list, *, endpoint: str, model: str) -> dict:
+async def chat_completion(
+    messages: list,
+    tools: list,
+    *,
+    endpoint: str,
+    model: str,
+    max_output_tokens: int | None = None,
+) -> dict:
     url = f"{endpoint}/v1/chat/completions"
     payload = {"model": model, "messages": messages, "tools": tools, "stream": False}
+    if isinstance(max_output_tokens, int) and max_output_tokens > 0:
+        payload["max_tokens"] = max_output_tokens
     logger.info(
-        "ollama chat_completion start endpoint=%s model=%s messages=%s tools=%s",
+        "ollama chat_completion start endpoint=%s model=%s max_output_tokens=%s messages=%s tools=%s",
         endpoint,
         model,
+        max_output_tokens,
         len(messages or []),
         len(tools or []),
     )

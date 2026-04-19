@@ -5,12 +5,15 @@
   "Sends a chat completion request to an Ollama instance using the
    OpenAI-compatible endpoint. Returns a js/Promise resolving to
    the parsed response map."
-  [{:keys [endpoint model messages]}]
+  [{:keys [endpoint model max-output-tokens messages]}]
   (let [url  (str endpoint "/v1/chat/completions")
-        body (clj->js {:model    model
-                       :messages messages
-                       :tools    tools/tool-definitions
-                       :stream   false})]
+        body (clj->js
+               (cond-> {:model    model
+                        :messages messages
+                        :tools    tools/tool-definitions
+                        :stream   false}
+                 (and (number? max-output-tokens) (pos? max-output-tokens))
+                 (assoc :max_tokens max-output-tokens)))]
     (-> (js/fetch url
           #js {:method  "POST"
                :headers #js {"Content-Type" "application/json"}

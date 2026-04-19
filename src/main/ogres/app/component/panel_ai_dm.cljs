@@ -21,7 +21,15 @@
       (let [{:keys [config update-config pending status trigger-turn clear-history]} ctx
             {:keys [enabled backend endpoint model scenario auto-approve interval-ms
                     voice-enabled voice-id voice-speed
-                    vision-enabled vision-model]} config]
+                    vision-enabled vision-model
+                    max-output-tokens]} config
+            parse-max-output
+            (fn [value]
+              (let [trimmed (some-> value str .trim)]
+                (if (or (nil? trimmed) (= trimmed ""))
+                  nil
+                  (let [n (js/parseInt trimmed 10)]
+                    (if (or (js/isNaN n) (<= n 0)) nil n)))))]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")
@@ -90,6 +98,18 @@
                  :placeholder (if (= backend :ollama) "llama3.1" "grok-3-mini")
                  :on-change #(update-config
                                (fn [c] (assoc c :model (.. % -target -value))))}))
+
+            ;; Max output tokens (blank = provider default)
+            ($ field-row {:label "Max output tokens"}
+              ($ :input.text
+                {:type "number"
+                 :min 1
+                 :step 1
+                 :value (or max-output-tokens "")
+                 :placeholder "blank = provider default"
+                 :on-change #(update-config
+                               (fn [c] (assoc c :max-output-tokens
+                                         (parse-max-output (.. % -target -value)))))}))
 
             ;; Scenario
             ($ field-row {:label "Scenario"}
