@@ -7,8 +7,11 @@ Checks tool calls for obvious errors before sending to the client:
 Populates validation_errors; the graph retries via reflect node if non-empty.
 """
 import json
+import logging
 import re
 from ai_dm.state import DMState
+
+logger = logging.getLogger(__name__)
 
 # These tools must never target a player-flagged token
 PLAYER_PROTECTED = {"move_token", "remove_token"}
@@ -34,6 +37,7 @@ def _extract_player_ids(game_state: str) -> set[int]:
 
 
 def validate(state: DMState) -> DMState:
+    logger.info("validate start tool_calls=%s", len(state.get("tool_calls", [])))
     errors = []
     known_ids = _extract_token_ids(state["game_state"])
     player_ids = _extract_player_ids(state["game_state"])
@@ -68,4 +72,8 @@ def validate(state: DMState) -> DMState:
             if tid is not None and tid not in known_ids:
                 errors.append(f"move_player_token: token_id {tid} does not exist on board")
 
+    if errors:
+        logger.warning("validate failed errors=%s", errors)
+    else:
+        logger.info("validate success")
     return {**state, "validation_errors": errors}

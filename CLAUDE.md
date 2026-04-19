@@ -38,8 +38,9 @@ We are building an AI Dungeon Master feature. The full spec is in `prd.md`.
 - Reads live game state (tokens, initiative, HP) from DataScript
 - Calls an LLM backend (Ollama or Grok) using the OpenAI-compatible **tool calling** API
 - The LLM invokes typed tools (`spawn_token`, `move_token`, `update_hp`, etc.) to control the board
-- Narration text is broadcast to all players via the existing WebSocket room
+- Narration text is broadcast to all players via the existing WebSocket room (prose/dialogue only)
 - Host can run in **confirm mode** (approve each action) or **auto mode** (fully autonomous)
+- Vision enriches context with terrain + local visibility (`cover`/`foliage`/`summary`) for both player and NPC observer tokens
 
 ### LLM Backends
 | Backend | How | Notes |
@@ -94,6 +95,19 @@ Server logs to `logs/ogres.log` (relative to process working directory).
 Configured via `src/main/simplelogger.properties` (SLF4J Simple).
 The `logs/` directory is git-ignored.
 
+AI sidecar logs to `logs/ai_dm.log` (rotating file handler).
+Configurable via:
+- `AI_DM_LOG_DIR` (default: `logs`)
+- `AI_DM_LOG_FILE` (default: `ai_dm.log`)
+- `AI_DM_LOG_LEVEL` (default: `INFO`)
+
+Sidecar logging includes:
+- HTTP request lifecycle (request id, path, status, duration)
+- `/dm/turn` start/success/failure with retry and validation context
+- LangGraph node execution (`assess`, `plan`, `validate`, `reflect`)
+- Backend call failures (`ollama`, `grok`) with stack traces
+- TTS execution and failure paths
+
 Key log events:
 - `:server/start` — on `-main`
 - `:room/created` — host opens or auto-creates a room
@@ -111,6 +125,8 @@ Key log events:
 | `src/main/ogres/app/provider/state.cljs` | DataScript schema |
 | `src/main/ogres/app/provider/session.cljs` | WebSocket multiplayer sync |
 | `src/main/simplelogger.properties` | SLF4J file logging config |
+| `ai_dm/logging_config.py` | AI sidecar rotating file logger setup |
+| `ai_dm/main.py` | Sidecar request logging middleware + endpoint logging |
 | `prd.md` | Full AI DM product requirements document |
 | `deps.edn` | Clojure dependencies |
 | `shadow-cljs.edn` | ClojureScript build config |

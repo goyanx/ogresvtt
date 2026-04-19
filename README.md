@@ -63,10 +63,10 @@
 **AI Dungeon Master** *(experimental)*
 - LLM-powered DM that reads the live board and controls NPC/monster tokens
 - Spawns, moves, and removes tokens; rolls initiative; updates HP
-- Narrates events to all players in real time via the DM Narration panel
+- Narrates events to all players in real time via the DM Narration panel (prose/dialogue only; no JSON output)
 - Two-way chat — ask the DM questions and get in-character responses
 - Voice narration via Kokoro TTS (British male narrator by default)
-- **Terrain vision** — vision model detects what surface each token stands on (stone floor, dungeon wall, forest path, etc.) and includes it in the DM's context
+- **Terrain + local visibility vision** — vision model detects token terrain plus nearby cover/foliage in local radius around both player and NPC observer tokens
 - Player movement — typing "I move north" shifts the player's token on the board
 - Query tools — DM can call `list_tokens` mid-turn to inspect who is on the board
 - Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
@@ -170,6 +170,12 @@ pip install -r requirements.txt
 uvicorn ai_dm.main:app --port 8765 --reload
 ```
 
+Sidecar logs are written to `logs/ai_dm.log` by default (auto-created).  
+You can override this with environment variables:
+- `AI_DM_LOG_DIR` (default `logs`)
+- `AI_DM_LOG_FILE` (default `ai_dm.log`)
+- `AI_DM_LOG_LEVEL` (default `INFO`)
+
 In OgresVTT open the **wand icon** panel → set Backend to `LangGraph sidecar (multi-step)`.
 
 ### Voice Narration (optional)
@@ -189,7 +195,7 @@ Once the sidecar is running, enable **Voice narration** in the AI DM panel and s
 
 ### Terrain Vision (optional)
 
-The AI DM can detect what terrain each token is standing on by sending a cropped region of the map to a vision model. This enriches its narration and tactics — a goblin on a "stone bridge" behaves differently from one on "open grassland".
+The AI DM can detect what terrain each token is standing on and what local cover/foliage is nearby by sending cropped map regions to a vision model. This enriches narration and tactics — a goblin behind "broken pillars and brush" behaves differently from one in "open grassland".
 
 1. Pull the vision model:
    ```powershell
@@ -200,7 +206,15 @@ The AI DM can detect what terrain each token is standing on by sending a cropped
 
 3. Make sure your scene has a background map image — terrain detection is skipped if no image is loaded
 
-The detection runs concurrently for all tokens before each DM turn. Results appear in the game state prompt as `terrain: "stone cave floor"` per token.
+Detection runs concurrently for all tokens before each DM turn.
+Internal vision responses are constrained to a generic JSON envelope (`{"results":[...]}`) and parsed strictly.
+
+Results are injected into DM context as:
+- terrain per token (`terrain: "stone cave floor"`)
+- local observer visibility (~10 squares default, adjusted by token stats/conditions) for both player and NPC tokens
+- local `cover`, `foliage`, and short `summary` strings per observer token
+
+DM narration is constrained to natural language only (descriptions/dialogue), with structured data stripped before display.
 
 ---
 

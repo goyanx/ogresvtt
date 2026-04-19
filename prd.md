@@ -6,6 +6,18 @@ Add an AI Dungeon Master (AI DM) feature to OgresVTT that uses a locally-hosted 
 
 The AI DM acts as a host-side agent: it reads game state from the DataScript database, decides what should happen next, and dispatches the same events a human DM would — placing tokens, moving them, rolling initiative, and updating health — while narrating the scene in a sidebar chat.
 
+### Implementation Updates (Current)
+
+This PRD documents design intent; the current implementation includes these concrete behavior updates:
+
+- **Narration output policy**: DM output shown to users is prose-only (descriptions, dialogue, atmosphere). Structured outputs (JSON/YAML/XML/code blocks/tables/key-value dumps) are disallowed by prompt rules and filtered at runtime.
+- **Vision response contract**: vision model responses are parsed from a generic JSON envelope:
+  - Terrain pass: `{"results":[{"index":1,"terrain":"..."}]}`
+  - Local-context pass: `{"results":[{"index":1,"cover":"...","foliage":"...","summary":"..."}]}`
+- **Local visibility scope**: pre-LLM vision now runs for **both player and NPC observer tokens**, with a default radius of ~10 squares, adjusted by token stats/conditions (`token/light`, size, blinded/unconscious/restrained, etc.).
+- **Context enrichment**: DM receives local `cover`, `foliage`, and `summary` per observer token in addition to terrain labels.
+- **Sidecar logging**: Python sidecar writes rotating logs to `logs/ai_dm.log` (configurable via `AI_DM_LOG_DIR`, `AI_DM_LOG_FILE`, `AI_DM_LOG_LEVEL`).
+
 ---
 
 ## Problem Statement
@@ -267,22 +279,20 @@ Receive tool_calls from model response
 
 ### 6. Terrain Vision Detection
 
-Before each AI DM turn, if **Terrain vision** is enabled and the scene has a background image, the system:
+Before each AI DM turn, if **Terrain vision** is enabled and the scene has a background image, the system runs two batched vision passes:
 
 1. Pulls each token's pixel position from DataScript (`:object/point`).
-2. Crops a square region of the scene background image (3 × grid-size px by default) centred on each token using an offscreen Canvas.
-3. Encodes the crop as a JPEG base64 string and sends it to the Ollama `/api/chat` vision endpoint.
-4. Receives a 2–5 word terrain description (e.g. `"stone cave floor"`, `"wooden bridge"`, `"shallow water"`).
-5. Detections run concurrently via `Promise.all` and are assembled into a `token-id → terrain-string` map.
-6. The map is passed to `prompt/serialize-game-state` which appends `terrain: "..."` to each token's line in the game state prompt.
-
-**Vision prompt:**
-```
-You are analysing a small crop from a fantasy tabletop RPG map.
-Describe ONLY the terrain/surface type in 2-5 words.
-Examples: 'stone cave floor', 'dungeon wall', 'underground river', ...
-Do NOT mention any tokens, figures, or game pieces.
-```
+2. Crops square regions around tokens using an offscreen Canvas:
+   - Terrain crop pass for all tokens.
+   - Local context crop pass for observer tokens (players + NPCs), default ~10 squares radius, adjusted by token stats/conditions.
+3. Encodes crops as JPEG base64 and sends them in batched requests to Ollama `/api/chat`.
+4. Parses strict generic JSON envelopes:
+   - Terrain pass: `{"results":[{"index":1,"terrain":"..."}]}`
+   - Local context pass: `{"results":[{"index":1,"cover":"...","foliage":"...","summary":"..."}]}`
+5. Combines outputs into prompt context:
+   - `token-id -> terrain`
+   - `token-id -> {radius-squares, cover, foliage, summary}`
+6. Serializer appends terrain and local visibility sections to the game state prompt.
 
 **Recommended vision model:** `qwen3-vl:8b` (runs in ~7 GB VRAM, spatial reasoning, OCR in 32 languages).
 
@@ -351,19 +361,17 @@ SCENARIO:
 {scenario-prompt}
 
 RULES:
-- Respond ONLY with valid JSON matching the schema provided.
+- Use tool calls for board actions and narrate in plain natural language.
+- Never output JSON, YAML, XML, code blocks, tables, or key-value dumps in player-facing narration.
 - Do not move player tokens (they are controlled by players).
 - Keep narration under 100 words per turn.
 - Position coordinates are in pixels; the grid cell size is {grid-size}px.
 - Snap token positions to the nearest grid cell center.
 - Do not repeat the same action twice in a row.
-- If there is nothing to do, return an empty actions array with brief flavor narration.
+- If there is nothing to do, call narrate with brief flavor text.
 
 CURRENT GAME STATE:
 {game-state}
-
-RESPONSE SCHEMA:
-{"narration": "string", "actions": [...]}
 ```
 
 ---

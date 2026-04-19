@@ -1,5 +1,6 @@
 (ns ogres.app.ai.tool-dispatch
   (:require [datascript.core :as ds]
+            [ogres.app.ai.text :as ai-text]
             [ogres.app.const :refer [grid-size half-size]]
             [ogres.app.vec :refer [Vec2]]))
 
@@ -42,10 +43,12 @@
 
 (defmethod dispatch-tool "narrate"
   [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
-  (when (seq text)
-    (dispatch :narration/append text "ai")
-    (when on-narrate (on-narrate text)))
-  {:ok true})
+  (if-let [narration (ai-text/narrative-only text)]
+    (do
+      (dispatch :narration/append narration "ai")
+      (when on-narrate (on-narrate narration))
+      {:ok true})
+    {:ok false :reason "Narration contained only structured output."}))
 
 (defmethod dispatch-tool "move_player_token"
   [dispatch db _ {:keys [token_id direction squares]} _opts]

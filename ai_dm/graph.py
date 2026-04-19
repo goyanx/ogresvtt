@@ -15,6 +15,7 @@ The graph returns the final tool_calls list to the FastAPI handler,
 which serialises them back to the ClojureScript client.
 """
 import functools
+import logging
 from langgraph.graph import StateGraph, END
 
 from ai_dm.state import DMState
@@ -24,11 +25,22 @@ from ai_dm.nodes.validate import validate
 from ai_dm.nodes.reflect import reflect
 
 MAX_RETRIES = 2
+logger = logging.getLogger(__name__)
 
 
 def _should_retry(state: DMState) -> str:
     if state["validation_errors"] and state["retry_count"] < MAX_RETRIES:
+        logger.warning(
+            "graph retry requested retry_count=%s validation_errors=%s",
+            state["retry_count"],
+            len(state["validation_errors"]),
+        )
         return "reflect_retry"
+    logger.info(
+        "graph finished retry_count=%s validation_errors=%s",
+        state["retry_count"],
+        len(state["validation_errors"]),
+    )
     return END
 
 
@@ -37,6 +49,7 @@ def build_graph(llm_call):
     llm_call: async callable(messages, tools) → OpenAI-compatible response dict.
     Inject the backend-specific function so the graph stays backend-agnostic.
     """
+    logger.info("building DM state graph")
     bound_assess  = functools.partial(assess, llm_call=llm_call)
     bound_plan    = functools.partial(plan,   llm_call=llm_call)
     bound_reflect = functools.partial(reflect, llm_call=llm_call)

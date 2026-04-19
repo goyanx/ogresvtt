@@ -10,10 +10,75 @@
      image-y = token-y × (scene-gs / const-gs) + origin-y
 
    Pull the model first:
-     ollama pull qwen3-vl:8b")
+     ollama pull qwen3-vl:8b"
+  (:require [clojure.string :as str]))
 
 ;; The fixed rendering unit used by OgresVTT (grid-size constant = 70px).
 (def ^:private const-gs 70)
+
+(defn- player-token?
+  [{:keys [token/flags]}]
+  (contains? (set flags) :player))
+
+(defn- token-kind [token]
+  (if (player-token? token) "player" "npc"))
+
+(defn- feet->squares [feet]
+  (-> (/ feet 5) js/Math.ceil int))
+
+(defn- token-vision-squares
+  "Returns an observer visibility radius in grid squares.
+   Defaults to 10 squares and adjusts by token stats/conditions."
+  [{:keys [token/flags token/light token/size]}]
+  (let [flags       (set flags)
+        base        10
+        light-ft    (if (number? light) light 0)
+        light-sq    (if (pos? light-ft) (feet->squares light-ft) base)
+        size-bonus  (cond
+                      (>= (or size 0) 15) 2
+                      (>= (or size 0) 10) 1
+                      :else 0)
+        normal      (-> (max base light-sq)
+                        (+ size-bonus)
+                        (min 16))]
+    (cond
+      (contains? flags :unconscious) 1
+      (contains? flags :blinded)     2
+      (contains? flags :restrained)  (max 4 (dec normal))
+      :else                          normal)))
+
+(defn- clean-text
+  ([value] (clean-text value "unknown"))
+  ([value fallback]
+   (let [s (some-> value str str/trim)]
+     (if (seq s) s fallback))))
+
+(defn- parse-index [value]
+  (cond
+    (number? value) (int value)
+    (string? value) (let [n (js/parseInt value 10)]
+                      (when-not (js/isNaN n) n))
+    :else nil))
+
+(defn- parse-model-json
+  "Parses JSON emitted by the model. If the model prepends/appends text,
+   attempts to recover the outermost JSON object."
+  [json]
+  (let [content (-> (js->clj json :keywordize-keys true)
+                    (get-in [:message :content])
+                    (some-> .trim))]
+    (when (seq content)
+      (or
+        (try
+          (js->clj (js/JSON.parse content) :keywordize-keys true)
+          (catch :default _ nil))
+        (let [start (.indexOf content "{")
+              end   (.lastIndexOf content "}")]
+          (when (and (>= start 0) (> end start))
+            (try
+              (js->clj (js/JSON.parse (.substring content start (inc end)))
+                :keywordize-keys true)
+              (catch :default _ nil))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Canvas crop helpers
@@ -64,8 +129,60 @@
                     "The images are in order — one crop per token. "
                     "For each image describe ONLY the terrain/surface type in 2-4 words. "
                     "Do NOT mention tokens, figures, or game pieces. "
-                    "Respond with JSON only, no other text: "
-                    "{\"terrains\":[\"terrain for image 1\",\"terrain for image 2\",...]}")
+                    "Return JSON ONLY with this exact generic structure and no extra keys: "
+                    "{\"results\":[{\"index\":1,\"terrain\":\"...\"}]}. "
+                    "index is 1-based image order.")
+        url    (str endpoint "/api/chat")
+        body   (clj->js {:model    model
+                         :stream   false
+                         :format   "json"
+                         :messages [{:role    "user"
+                                      :content prompt
+                                      :images  images}]})]
+    (-> (js/fetch url
+          #js {:method  "POST"
+               :headers #js {"Content-Type" "application/json"}
+               :body    (js/JSON.stringify body)})
+        (.then (fn [resp]
+                 (if (.-ok resp) (.json resp) (js/Promise.resolve nil))))
+        (.then (fn [json]
+                 (when json
+                   (let [parsed  (parse-model-json json)
+                         results (if (sequential? (:results parsed)) (:results parsed) [])]
+                     (into {}
+                       (keep-indexed
+                         (fn [i result]
+                           (let [idx (or (parse-index (:index result)) (inc i))
+                                 id  (nth ids (dec idx) nil)]
+                             (when id
+                               [id (clean-text (:terrain result) "unknown terrain")])))
+                         results))))))
+        (.catch (fn [_] {})))))
+
+(defn- batch-query-local-context-model
+  "Sends observer-centered crops in one /api/chat request and returns a map of
+   token-id -> {:radius-squares n :cover s :foliage s :summary s}."
+  [endpoint model token-entries]
+  (let [ids    (mapv :id token-entries)
+        radii  (mapv :radius-squares token-entries)
+        kinds  (mapv :kind token-entries)
+        images (mapv :b64 token-entries)
+        n      (count ids)
+        ranges (str/join ", "
+                 (map-indexed
+                   (fn [i r] (str "image " (inc i) " (" (nth kinds i "observer") "): " r " squares"))
+                   radii))
+        prompt (str "You are analyzing " n " tabletop map crops centered on observer tokens (players and NPCs). "
+                    "Each crop covers only the local area around a token. "
+                    "Approximate visibility radius per image: " ranges ". "
+                    "For each image, identify nearby cover and foliage only in that local area. "
+                    "Return JSON ONLY with this exact generic structure and no extra keys: "
+                    "{\"results\":[{\"index\":1,\"cover\":\"...\",\"foliage\":\"...\",\"summary\":\"...\"}]}. "
+                    "Rules: "
+                    "cover=barriers usable for protection (walls, rocks, crates, pillars, wagons). "
+                    "foliage=plants/brush/trees/vines. "
+                    "summary=one short sentence about what is immediately visible. "
+                    "If none, use \"none\".")
         url    (str endpoint "/api/chat")
         body   (clj->js {:model    model
                          :stream   false
@@ -79,21 +196,24 @@
                :body    (js/JSON.stringify body)})
         (.then (fn [resp]
                  (if (.-ok resp) (.json resp) (js/Promise.resolve nil))))
-        (.then (fn [json]
-                 (when json
-                   (let [text (-> (js->clj json :keywordize-keys true)
-                                  (get-in [:message :content])
-                                  (some-> .trim))]
-                     (try
-                       (let [parsed   (js->clj (js/JSON.parse text) :keywordize-keys true)
-                             terrains (or (:terrains parsed) [])]
-                         (into {}
-                           (keep-indexed
-                             (fn [i terrain]
-                               (when-let [id (nth ids i nil)]
-                                 [id terrain]))
-                             terrains)))
-                       (catch :default _ {}))))))
+        (.then
+          (fn [json]
+            (when json
+              (let [parsed  (parse-model-json json)
+                    results (if (sequential? (:results parsed)) (:results parsed) [])]
+                (into {}
+                  (keep-indexed
+                    (fn [i result]
+                      (let [idx (or (parse-index (:index result)) (inc i))
+                            id  (nth ids (dec idx) nil)]
+                        (when id
+                          [id {:radius-squares (or (nth radii (dec idx) nil)
+                                                   (nth radii i nil)
+                                                   10)
+                               :cover          (clean-text (:cover result) "none")
+                               :foliage        (clean-text (:foliage result) "none")
+                               :summary        (clean-text (:summary result) "Local details unclear.")}])))
+                    results))))))
         (.catch (fn [_] {})))))
 
 ;; ---------------------------------------------------------------------------
@@ -150,3 +270,62 @@
                        (batch-query-vision-model endpoint model entries))
                      (js/Promise.resolve {}))))
           (.catch (fn [_] {}))))))
+
+(defn detect-local-visibility!
+  "Detects local visual context around observer tokens (players and NPCs).
+   Returns a Promise resolving to:
+     token-id -> {:radius-squares n :cover s :foliage s :summary s}
+
+   opts:
+     :idb-read        — IDB reader fn (idb/use-reader \"images\")
+     :endpoint        — Ollama base URL (default http://localhost:11434)
+     :model           — vision model tag (default qwen3-vl:8b)
+     :image-hash      — hash of the scene background image
+     :scene-gs        — scene's :scene/grid-size in px (default 70)
+     :origin-x        — :scene/grid-origin x component (default 0)
+     :origin-y        — :scene/grid-origin y component (default 0)
+     :default-squares — fallback observer radius in tiles (default 10)
+     :dst-px          — output crop size in px for model input (default 700)"
+  [tokens {:keys [idb-read endpoint model image-hash scene-gs origin-x origin-y default-squares dst-px]
+           :or   {endpoint        "http://localhost:11434"
+                  model           "qwen3-vl:8b"
+                  scene-gs        const-gs
+                  origin-x        0
+                  origin-y        0
+                  default-squares 10
+                  dst-px          (* 10 const-gs)}}]
+  (let [img-scale  (/ scene-gs const-gs)
+        observers  (filterv
+                     (fn [{:keys [db/id object/point]}]
+                       (and id point))
+                     tokens)]
+    (if (empty? observers)
+      (js/Promise.resolve {})
+      (-> (idb-read image-hash)
+          (.then (fn [record]
+                   (if (and record (.-data record))
+                     (load-image-from-blob (.-data record))
+                     (js/Promise.resolve nil))))
+          (.then
+            (fn [img]
+              (if img
+                (let [entries
+                      (mapv
+                        (fn [{:keys [db/id object/point] :as token}]
+                          (let [radius (max 2 (or (token-vision-squares token) default-squares))
+                                src-px (* 2 radius scene-gs)
+                                ix     (+ (* (.-x point) img-scale) origin-x)
+                                iy     (+ (* (.-y point) img-scale) origin-y)]
+                            {:id             id
+                             :kind           (token-kind token)
+                             :radius-squares radius
+                             :b64            (crop-to-base64 img ix iy src-px dst-px)}))
+                        observers)]
+                  (batch-query-local-context-model endpoint model entries))
+                (js/Promise.resolve {}))))
+          (.catch (fn [_] {}))))))
+
+(defn detect-player-visibility!
+  "Backward-compatible wrapper; now includes NPC tokens too."
+  [tokens opts]
+  (detect-local-visibility! tokens opts))

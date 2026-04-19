@@ -3,6 +3,7 @@
    LLM calls, and tool call dispatch. Runs entirely in the host's browser."
   (:require [datascript.core :as ds]
             [ogres.app.ai.prompt :as prompt]
+            [ogres.app.ai.text :as ai-text]
             [ogres.app.ai.tool-dispatch :as tool-dispatch]
             [ogres.app.ai.backends.ollama :as ollama]
             [ogres.app.ai.backends.grok :as grok]
@@ -86,14 +87,16 @@
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
   [conn dispatch config idb-read history set-history set-pending]
   (set-pending true)
-  (let [db         @conn
+  (let [token-vision-pull
+        [:db/id :token/flags :token/light :token/size :object/point]
+        db         @conn
         user       (ds/entity db [:db/ident :user])
         scene      (-> user :user/camera :camera/scene)
         image-hash (-> scene :scene/image :image/hash)
         gs         (or (:scene/grid-size scene) grid-size)
         origin     (:scene/grid-origin scene)
         all-tokens (when (:scene/tokens scene)
-                     (ds/pull-many db [:db/id :object/point]
+                     (ds/pull-many db token-vision-pull
                        (map :db/id (:scene/tokens scene))))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
@@ -106,11 +109,25 @@
                         :scene-gs   gs
                         :origin-x   (if origin (.-x origin) 0)
                         :origin-y   (if origin (.-y origin) 0)})
-                     (js/Promise.resolve {}))]
-    (-> terrain-p
+                     (js/Promise.resolve {}))
+        visibility-p
+        (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+          (vision/detect-local-visibility! all-tokens
+            {:idb-read   idb-read
+             :endpoint   (:endpoint config)
+             :model      (or (:vision-model config) "qwen3-vl:8b")
+             :image-hash image-hash
+             :scene-gs   gs
+             :origin-x   (if origin (.-x origin) 0)
+             :origin-y   (if origin (.-y origin) 0)
+             :default-squares 10})
+          (js/Promise.resolve {}))]
+    (-> (js/Promise.all #js [terrain-p visibility-p])
         (.then
-          (fn [terrain-map]
-            (let [game-state (prompt/serialize-game-state db terrain-map)
+          (fn [results]
+            (let [terrain-map    (or (aget results 0) {})
+                  visibility-map (or (aget results 1) {})
+                  game-state     (prompt/serialize-game-state db terrain-map visibility-map)
                   system-msg {:role "system"
                               :content (prompt/build-system-prompt
                                          (:scenario config) game-state gs)}
@@ -129,8 +146,13 @@
                                     :voice       (:voice-id config)
                                     :speed       (:voice-speed config)})))]
               (when (and (seq content) (empty? tool-calls))
-                (dispatch :narration/append content "ai")
-                (speak! content))
+                (if-let [narration (ai-text/narrative-only content)]
+                  (do
+                    (dispatch :narration/append narration "ai")
+                    (speak! narration))
+                  (let [fallback "The room holds a tense silence as everyone studies the scene."]
+                    (dispatch :narration/append fallback "ai")
+                    (speak! fallback))))
               (when (seq tool-calls)
                 (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
                   {:on-narrate speak!}))

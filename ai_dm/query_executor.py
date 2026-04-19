@@ -6,7 +6,10 @@ Supported query tools:
   list_tokens(filter="all"|"player"|"npc")
 """
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_tokens(game_state: str) -> list[dict]:
@@ -75,6 +78,11 @@ def execute_query_tool(tool_name: str, arguments: dict, game_state: str) -> str:
     if tool_name == "list_tokens":
         filter_type = arguments.get("filter", "all")
         all_tokens = _parse_tokens(game_state)
+        logger.info(
+            "query_tool list_tokens filter=%s total_tokens=%s",
+            filter_type,
+            len(all_tokens),
+        )
         if filter_type == "player":
             result = [t for t in all_tokens if t["type"] == "player"]
         elif filter_type == "npc":
@@ -83,4 +91,5 @@ def execute_query_tool(tool_name: str, arguments: dict, game_state: str) -> str:
             result = all_tokens
         return json.dumps({"tokens": result, "count": len(result)}, indent=2)
 
+    logger.warning("query_tool unknown tool_name=%s", tool_name)
     return json.dumps({"error": f"Unknown query tool: {tool_name}"})

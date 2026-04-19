@@ -10,10 +10,12 @@ Voices suited for a Dungeon Master:
   af_sky     - American female, dramatic
 """
 import io
+import logging
 import numpy as np
 import soundfile as sf
 
 _pipeline = None
+logger = logging.getLogger(__name__)
 
 
 def _get_pipeline(voice: str = "bm_george"):
@@ -23,6 +25,7 @@ def _get_pipeline(voice: str = "bm_george"):
         # lang_code: 'a' = American English, 'b' = British English
         lang = "b" if voice.startswith("b") else "a"
         _pipeline = KPipeline(lang_code=lang)
+        logger.info("kokoro pipeline initialized lang=%s", lang)
     return _pipeline
 
 
@@ -32,17 +35,20 @@ def synthesize(text: str, voice: str = "bm_george", speed: float = 0.95) -> byte
     speed < 1.0 = slower/more dramatic, > 1.0 = faster.
     """
     pipeline = _get_pipeline(voice)
+    logger.info("tts synthesize start voice=%s speed=%s text_chars=%s", voice, speed, len(text or ""))
     audio_chunks = []
     for _, _, audio in pipeline(text, voice=voice, speed=speed):
         if audio is not None:
             audio_chunks.append(audio)
 
     if not audio_chunks:
+        logger.warning("tts synthesize no audio chunks produced")
         return b""
 
     combined = np.concatenate(audio_chunks)
     buf = io.BytesIO()
     sf.write(buf, combined, samplerate=24000, format="WAV")
+    logger.info("tts synthesize success wav_bytes=%s", len(buf.getvalue()))
     return buf.getvalue()
 
 
