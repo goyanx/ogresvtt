@@ -272,7 +272,7 @@
                      (js/Promise.resolve {}))))
           (.catch (fn [e]
                     (js/console.warn "[vision] terrain failed" e)
-                    {})))))))
+                    {}))))))
 
 (defn detect-local-visibility!
   "Detects local visual context around observer tokens (players and NPCs).

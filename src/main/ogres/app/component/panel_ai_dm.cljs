@@ -193,4 +193,4 @@
             ($ :button.button.button-neutral
               {:on-click clear-vision-cache
                :title    "Forces terrain/visibility to re-query the vision model next turn"}
-              "Clear vision cache"))))))))
+              "Clear vision cache")))))))
