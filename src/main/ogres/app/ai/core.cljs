@@ -113,7 +113,7 @@
 
 (defn run-turn!
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
-  [conn dispatch config idb-read history set-history set-pending]
+  [conn dispatch config idb-read history set-history set-pending set-status]
   (set-pending true)
   (let [t0     (js/performance.now)
         timing #js {:tokens 0 :terrain "-" :vis "-" :llm "-" :tools 0 :total "-"}
@@ -130,6 +130,11 @@
                      (ds/pull-many db token-vision-pull
                        (map :db/id (:scene/tokens scene))))
         _          (aset timing "tokens" (count all-tokens))
+        vision-active? (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+        _          (set-status (if vision-active? "scanning the scene"
+                                 (case (:backend config)
+                                   :langgraph "planning the next move"
+                                   "deciding what happens")))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
         vision-opts {:idb-read   idb-read
@@ -140,7 +145,7 @@
                      :origin-x   (if origin (.-x origin) 0)
                      :origin-y   (if origin (.-y origin) 0)}
         terrain-p
-        (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+        (if vision-active?
           (if-let [cached (get @terrain-cache image-hash)]
             (do (aset timing "terrain" "hit") (js/Promise.resolve cached))
             (let [t1 (js/performance.now)]
@@ -152,7 +157,7 @@
           (do (aset timing "terrain" "off") (js/Promise.resolve {})))
         vis-key      (when (seq all-tokens) (token-pos-key all-tokens))
         visibility-p
-        (if (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
+        (if vision-active?
           (if-let [cached (get @visibility-cache vis-key)]
             (do (aset timing "vis" "hit") (js/Promise.resolve cached))
             (let [t1 (js/performance.now)]
@@ -174,6 +179,9 @@
                               :content (prompt/build-system-prompt
                                          (:scenario config) game-state gs)}
                   messages   (into [system-msg] (conj (vec history) user-msg))]
+              (set-status (case (:backend config)
+                            :langgraph "planning the next move"
+                            "deciding what happens"))
               (call-backend config messages))))
         (.then
           (fn [response]
@@ -189,17 +197,20 @@
                                     :voice       (:voice-id config)
                                     :speed       (:voice-speed config)})))]
               (aset timing "tools" (count tool-calls))
-              (when (and (seq content) (empty? tool-calls))
-                (if-let [narration (ai-text/narrative-only content)]
-                  (do
-                    (dispatch :narration/append narration "ai")
-                    (speak! narration))
-                  (let [fallback "The room holds a tense silence as everyone studies the scene."]
-                    (dispatch :narration/append fallback "ai")
-                    (speak! fallback))))
-              (when (seq tool-calls)
-                (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
-                  {:on-narrate speak!}))
+              (if (seq tool-calls)
+                (do
+                  (set-status "taking action")
+                  (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
+                    {:on-narrate speak!}))
+                (when (seq content)
+                  (set-status "narrating the scene")
+                  (if-let [narration (ai-text/narrative-only content)]
+                    (do
+                      (dispatch :narration/append narration "ai")
+                      (speak! narration))
+                    (let [fallback "The room holds a tense silence as everyone studies the scene."]
+                      (dispatch :narration/append fallback "ai")
+                      (speak! fallback)))))
               (set-history
                 (fn [h]
                   (let [h (conj (vec h) user-msg (or message {:role "assistant" :content ""}))]
@@ -220,6 +231,7 @@
                    " llm:" (aget timing "llm")
                    " tools:" (aget timing "tools")
                    " total:" (aget timing "total")))
+            (set-status "")
             (set-pending false))))))
 
 ;; ---------------------------------------------------------------------------
@@ -235,6 +247,7 @@
         idb-read                  (idb/use-reader "images")
         [config set-config]       (uix/use-state load-config)
         [pending set-pending]     (uix/use-state false)
+        [status set-status]       (uix/use-state "")
         [history set-history]     (uix/use-state [])
 
         update-config
@@ -250,7 +263,7 @@
         (uix/use-callback
           (fn []
             (when-not pending
-              (run-turn! conn dispatch config idb-read history set-history set-pending)))
+              (run-turn! conn dispatch config idb-read history set-history set-pending set-status)))
           [conn dispatch config idb-read history pending])
 
         send-message
@@ -261,7 +274,7 @@
               (let [user-msg {:role "user" :content text}
                     history' (vec (take-last 20 (conj history user-msg)))]
                 (set-history history')
-                (run-turn! conn dispatch config idb-read history' set-history set-pending))))
+                (run-turn! conn dispatch config idb-read history' set-history set-pending set-status))))
           [conn dispatch config idb-read history pending])
 
         ctx-value
@@ -270,12 +283,13 @@
             {:config             config
              :update-config      update-config
              :pending            pending
+             :status             status
              :history            history
              :trigger-turn       trigger-turn
              :send-message       send-message
              :clear-history      #(set-history [])
              :clear-vision-cache clear-vision-cache!})
-          [config update-config pending history trigger-turn send-message])]
+          [config update-config pending status history trigger-turn send-message])]
 
     ;; Auto-run timer
     (uix/use-effect

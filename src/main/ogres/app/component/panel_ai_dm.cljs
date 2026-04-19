@@ -18,7 +18,7 @@
         ctx (uix/use-context ai/context)
         [api-key set-api-key] (uix/use-state #(.getItem js/localStorage "ai-dm-api-key"))]
     (if (and host (some? ctx))
-      (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
+      (let [{:keys [config update-config pending status trigger-turn clear-history]} ctx
             {:keys [enabled backend endpoint model scenario auto-approve interval-ms
                     voice-enabled voice-id voice-speed
                     vision-enabled vision-model]} config]
@@ -27,7 +27,9 @@
             ($ :h2 "AI Dungeon Master")
             (if enabled
               ($ :span.ai-dm-status {:data-active true}
-                (if pending "Thinking..." "Active"))
+                (if pending
+                  (str "Thinking... " status)
+                  "Active"))
               ($ :span.ai-dm-status {:data-active false} "Disabled")))
 
           ($ :fieldset.ai-dm-fields
