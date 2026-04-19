@@ -84,11 +84,15 @@
 ;; Vision caches
 ;; ---------------------------------------------------------------------------
 
-;; Terrain is permanent — the map never changes. Cache forever by image-hash.
+;; Terrain key = "<image-hash>|<vis-key>" so it reruns whenever tokens move.
 (def ^:private terrain-cache (atom {}))
 
-;; Visibility depends on token positions. Key = sorted [id x y] tuples as string.
+;; Visibility key = vis-key (sorted [id x y] string).
 (def ^:private visibility-cache (atom {}))
+
+;; vis-key from the last turn where vision actually ran (not a cache hit).
+;; Both passes are skipped entirely when this matches the current vis-key.
+(def ^:private last-vis-key (atom nil))
 
 (defn- token-pos-key [tokens]
   (->> tokens
@@ -101,7 +105,8 @@
   "Clears both vision caches. Call when switching scenes or maps."
   []
   (reset! terrain-cache {})
-  (reset! visibility-cache {}))
+  (reset! visibility-cache {})
+  (reset! last-vis-key nil))
 
 (defn- trim-visibility-cache! []
   (when (> (count @visibility-cache) 50)
@@ -130,12 +135,17 @@
         all-tokens (when (:scene/tokens scene)
                      (ds/pull-many db token-vision-pull
                        (map :db/id (:scene/tokens scene))))
-        _          (aset timing "tokens" (count all-tokens))
+        _            (aset timing "tokens" (count all-tokens))
+        vis-key      (when (seq all-tokens) (token-pos-key all-tokens))
         vision-active? (and (:vision-enabled config) image-hash idb-read (seq all-tokens))
-        _          (phase! (if vision-active? "scanning the scene"
-                              (case (:backend config)
-                                :langgraph "planning the next move"
-                                "deciding what happens")))
+        pos-changed? (not= vis-key @last-vis-key)
+        terrain-key  (str image-hash "|" vis-key)
+        _            (phase! (cond
+                               (not vision-active?)        (case (:backend config)
+                                                             :langgraph "planning the next move"
+                                                             "deciding what happens")
+                               (not pos-changed?)          "using cached vision"
+                               :else                       "scanning the scene"))
         user-msg   {:role "user"
                     :content "It is your turn. Review the game state and take appropriate actions."}
         vision-opts {:idb-read   idb-read
@@ -146,30 +156,40 @@
                      :origin-x   (if origin (.-x origin) 0)
                      :origin-y   (if origin (.-y origin) 0)}
         terrain-p
-        (if vision-active?
-          (if-let [cached (get @terrain-cache image-hash)]
-            (do (aset timing "terrain" "hit") (js/Promise.resolve cached))
-            (let [t1 (js/performance.now)]
-              (-> (vision/detect-all-terrain! all-tokens vision-opts)
-                  (.then (fn [r]
-                           (swap! terrain-cache assoc image-hash r)
-                           (aset timing "terrain" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
-                           r)))))
-          (do (aset timing "terrain" "off") (js/Promise.resolve {})))
-        vis-key      (when (seq all-tokens) (token-pos-key all-tokens))
+        (cond
+          (not vision-active?)
+          (do (aset timing "terrain" "off") (js/Promise.resolve {}))
+
+          (or (not pos-changed?) (contains? @terrain-cache terrain-key))
+          (do (aset timing "terrain" "same")
+              (js/Promise.resolve (get @terrain-cache terrain-key {})))
+
+          :else
+          (let [t1 (js/performance.now)]
+            (-> (vision/detect-all-terrain! all-tokens vision-opts)
+                (.then (fn [r]
+                         (swap! terrain-cache assoc terrain-key r)
+                         (aset timing "terrain" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
+                         r)))))
         visibility-p
-        (if vision-active?
-          (if-let [cached (get @visibility-cache vis-key)]
-            (do (aset timing "vis" "hit") (js/Promise.resolve cached))
-            (let [t1 (js/performance.now)]
-              (-> (vision/detect-local-visibility! all-tokens
-                    (assoc vision-opts :default-squares 10 :dst-px 448))
-                  (.then (fn [r]
-                           (swap! visibility-cache assoc vis-key r)
-                           (trim-visibility-cache!)
-                           (aset timing "vis" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
-                           r)))))
-          (do (aset timing "vis" "off") (js/Promise.resolve {})))]
+        (cond
+          (not vision-active?)
+          (do (aset timing "vis" "off") (js/Promise.resolve {}))
+
+          (or (not pos-changed?) (contains? @visibility-cache vis-key))
+          (do (aset timing "vis" "same")
+              (js/Promise.resolve (get @visibility-cache vis-key {})))
+
+          :else
+          (let [t1 (js/performance.now)]
+            (-> (vision/detect-local-visibility! all-tokens
+                  (assoc vision-opts :default-squares 10 :dst-px 448))
+                (.then (fn [r]
+                         (swap! visibility-cache assoc vis-key r)
+                         (trim-visibility-cache!)
+                         (reset! last-vis-key vis-key)
+                         (aset timing "vis" (str (.toFixed (- (js/performance.now) t1) 0) "ms"))
+                         r)))))]
     (-> (js/Promise.all #js [terrain-p visibility-p])
         (.then
           (fn [results]
