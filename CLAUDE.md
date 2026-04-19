@@ -104,7 +104,7 @@ Configurable via:
 Sidecar logging includes:
 - HTTP request lifecycle (request id, path, status, duration)
 - `/dm/turn` start/success/failure with retry and validation context
-- LangGraph node execution (`assess`, `plan`, `validate`, `reflect`)
+- LangGraph node execution (`assess`, `plan`, `validate`, `reflect`) with `llm_duration_ms` per call
 - Backend call failures (`ollama`, `grok`) with stack traces
 - TTS execution and failure paths
 
@@ -115,6 +115,42 @@ Key log events:
 - `:session/left` — player disconnects
 - `:room/destroyed` — host disconnects, room torn down
 - `:ws/error` — WebSocket error with connection UUID
+
+### AI DM Turn Timing (browser console)
+
+Each turn emits one summary line — paste this to diagnose slowness:
+
+```
+[AI DM] tokens:4 terrain:hit vis:1823ms llm:3201ms tools:2 total:3204ms
+```
+
+| Field | Meaning |
+|-------|---------|
+| `tokens` | Number of tokens on scene |
+| `terrain` | `hit` = cache hit (free), `off` = vision disabled, `NNNms` = vision model call duration |
+| `vis` | Same as terrain but for local-visibility pass |
+| `llm` | Time from vision-complete to backend response (includes full LangGraph graph if sidecar) |
+| `tools` | Number of tool calls dispatched |
+| `total` | Wall time for the entire turn |
+
+Additional vision model-only timing (logged when a cache miss occurs):
+```
+[vision] terrain model 980ms
+[vision] local model 1640ms
+```
+
+### Vision Caching (ai/core.cljs)
+
+Two module-level atoms cache vision results to skip redundant Ollama calls:
+
+| Cache | Key | Lifetime | Rationale |
+|-------|-----|----------|-----------|
+| `terrain-cache` | `image-hash` | Forever | Terrain is static per map |
+| `visibility-cache` | Sorted `[id x y]` string of all tokens | Until any token moves | Invalidates automatically on movement |
+
+- Visibility cache is capped at 50 entries (`trim-visibility-cache!` keeps last 30 on overflow).
+- Both caches are cleared by `clear-vision-cache!`, exposed via AI DM context and the "Clear vision cache" panel button (visible when terrain vision is enabled).
+- Local visibility crops are sent at `dst-px=448` (down from 700) to reduce vision token count ~59%.
 
 ## Key Files
 

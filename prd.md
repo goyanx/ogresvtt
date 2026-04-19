@@ -16,7 +16,14 @@ This PRD documents design intent; the current implementation includes these conc
   - Local-context pass: `{"results":[{"index":1,"cover":"...","foliage":"...","summary":"..."}]}`
 - **Local visibility scope**: pre-LLM vision now runs for **both player and NPC observer tokens**, with a default radius of ~10 squares, adjusted by token stats/conditions (`token/light`, size, blinded/unconscious/restrained, etc.).
 - **Context enrichment**: DM receives local `cover`, `foliage`, and `summary` per observer token in addition to terrain labels.
-- **Sidecar logging**: Python sidecar writes rotating logs to `logs/ai_dm.log` (configurable via `AI_DM_LOG_DIR`, `AI_DM_LOG_FILE`, `AI_DM_LOG_LEVEL`).
+- **Sidecar logging**: Python sidecar writes rotating logs to `logs/ai_dm.log` (configurable via `AI_DM_LOG_DIR`, `AI_DM_LOG_FILE`, `AI_DM_LOG_LEVEL`). Each LangGraph node (`assess`, `plan` per round, `reflect`) logs `llm_duration_ms`.
+- **Turn timing summary**: Every turn emits one browser console line for performance diagnosis:
+  ```
+  [AI DM] tokens:4 terrain:hit vis:1823ms llm:3201ms tools:2 total:3204ms
+  ```
+  `terrain`/`vis` show `hit` (cache), `off` (disabled), or model call ms. `llm` covers the full backend including LangGraph graph time.
+- **Vision caching**: Terrain results cached permanently by `image-hash` (map never changes). Local-visibility results cached by sorted token-position key and invalidated automatically when any token moves. Local visibility crop size reduced from 700 px to 448 px (~59% fewer image tokens). Both caches cleared via `clear-vision-cache!` / "Clear vision cache" panel button.
+- **Float coordinate fix**: `query_executor.py` parses token positions with `round(float(...))` — scene-space coordinates are floats, not integers.
 
 ---
 
