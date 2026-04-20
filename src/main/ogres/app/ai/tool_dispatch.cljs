@@ -1,7 +1,16 @@
 (ns ogres.app.ai.tool-dispatch
   (:require [datascript.core :as ds]
+            [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size half-size]]
             [ogres.app.vec :refer [Vec2]]))
+
+(defn ^:private scene-geometry
+  "Returns `[walls doors]` for the scene the local user is viewing."
+  [db]
+  (let [scene (-> (ds/entity db [:db/ident :user])
+                  :user/camera :camera/scene)]
+    [(or (:scene/walls scene) [])
+     (or (:scene/doors scene) [])]))
 
 (defn ^:private valid-token?
   "Returns true if the given entity ID exists and is a token in the current scene."
@@ -51,11 +60,17 @@
   [dispatch db _ {:keys [token_id direction squares]} _opts]
   (if (valid-token? db token_id)
     (if-let [[dx dy] (direction->delta (or direction "north"))]
-      (let [n     (max 1 (or squares 1))
-            entity (:object/point (ds/entity db token_id))
-            delta  (Vec2. (* dx n grid-size) (* dy n grid-size))]
-        (dispatch :objects/translate token_id delta)
-        {:ok true :moved {:squares n :direction direction}})
+      (let [n       (max 1 (or squares 1))
+            origin  (:object/point (ds/entity db token_id))
+            ox      (.-x origin)
+            oy      (.-y origin)
+            tx      (+ ox (* dx n grid-size))
+            ty      (+ oy (* dy n grid-size))
+            [walls doors] (scene-geometry db)]
+        (if (collision/path-blocked? walls doors ox oy tx ty)
+          {:ok false :reason "Path is blocked by a wall or closed door."}
+          (do (dispatch :objects/translate token_id (Vec2. (- tx ox) (- ty oy)))
+              {:ok true :moved {:squares n :direction direction}})))
       {:ok false :reason (str "Unknown direction: " direction)})
     {:ok false :reason (str "Token " token_id " not found.")}))
 
@@ -68,10 +83,14 @@
         {:ok false :reason "Cannot move player tokens."}
         (let [target (snap-to-grid x y)
               origin (:object/point entity)
-              delta  (Vec2. (- (.-x target) (.-x origin))
-                            (- (.-y target) (.-y origin)))]
-          (dispatch :objects/translate token_id delta)
-          {:ok true})))
+              ox (.-x origin) oy (.-y origin)
+              tx (.-x target) ty (.-y target)
+              [walls doors] (scene-geometry db)]
+          (if (collision/path-blocked? walls doors ox oy tx ty)
+            {:ok false :reason "Path is blocked by a wall or closed door."}
+            (do (dispatch :objects/translate token_id
+                          (Vec2. (- tx ox) (- ty oy)))
+                {:ok true})))))
     {:ok false :reason (str "Token " token_id " not found.")}))
 
 (defmethod dispatch-tool "spawn_token"

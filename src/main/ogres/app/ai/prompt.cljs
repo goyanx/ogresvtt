@@ -1,6 +1,12 @@
 (ns ogres.app.ai.prompt
   (:require [datascript.core :as ds]
+            [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size]]))
+
+(def ^:private near-wall-distance
+  "Pixel radius within which a token is flagged as 'near a wall'.
+   One grid cell is the natural threshold."
+  grid-size)
 
 (def ^:private token-pull
   [:db/id
@@ -13,18 +19,54 @@
    :initiative/health
    :initiative/suffix])
 
-(defn- format-token [t]
-  (let [pt (:object/point t)]
-    (str "  - id: " (:db/id t)
-         ", label: \"" (or (:token/label t) "Unknown") "\""
-         (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
-         (when (:token/size t) (str ", size: " (:token/size t) "ft"))
-         (when (seq (:token/flags t))
-           (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
-         "\n")))
+(defn- format-token
+  ([t] (format-token t nil))
+  ([t walls]
+   (let [pt (:object/point t)
+         near-wall? (and pt (seq walls)
+                         (collision/point-near-wall?
+                          walls (.-x pt) (.-y pt) near-wall-distance))]
+     (str "  - id: " (:db/id t)
+          ", label: \"" (or (:token/label t) "Unknown") "\""
+          (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
+          (when (:token/size t) (str ", size: " (:token/size t) "ft"))
+          (when (seq (:token/flags t))
+            (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
+          (when near-wall? ", near_wall: true")
+          "\n"))))
 
 (defn- player-token? [t]
   (contains? (set (:token/flags t)) :player))
+
+(def ^:private max-blocked-pairs
+  "Maximum number of blocked-LOS pairs to include in the prompt. Caps
+   the worst case for busy maps so the prompt stays compact."
+  20)
+
+(defn- blocked-pairs
+  "Returns a sequence of [a b] pairs of tokens whose line-of-sight is
+   blocked by a wall or closed door. Capped at `max-blocked-pairs`."
+  [tokens walls doors]
+  (let [with-pts (filter :object/point tokens)
+        pairs    (for [[a & rest-ts] (iterate rest with-pts)
+                       :while a
+                       b rest-ts] [a b])]
+    (into []
+          (comp (filter (fn [[a b]]
+                          (let [pa (:object/point a)
+                                pb (:object/point b)]
+                            (collision/path-blocked?
+                             walls doors
+                             (.-x pa) (.-y pa) (.-x pb) (.-y pb)))))
+                (take max-blocked-pairs))
+          pairs)))
+
+(defn- format-blocked-pair [[a b]]
+  (str "  - "
+       (or (:token/label a) (str "#" (:db/id a)))
+       " (id " (:db/id a) ") <-> "
+       (or (:token/label b) (str "#" (:db/id b)))
+       " (id " (:db/id b) ")\n"))
 
 (defn serialize-game-state
   "Serializes the current scene's game state from the DataScript database
@@ -33,24 +75,35 @@
   (let [user  (ds/entity db [:db/ident :user])
         scene (-> user :user/camera :camera/scene)
         sid   (:db/id scene)
-        gs    (or (:scene/grid-size scene) grid-size)]
+        gs    (or (:scene/grid-size scene) grid-size)
+        walls (or (:scene/walls scene) [])
+        doors (or (:scene/doors scene) [])
+        closed-doors (count (filter :closed doors))]
     (when sid
       (let [all-tokens (ds/pull-many db token-pull (map :db/id (:scene/tokens scene)))
             players    (filter player-token? all-tokens)
             npcs       (remove player-token? all-tokens)
             initiative (ds/pull-many db token-pull (map :db/id (:scene/initiative scene)))
-            rounds     (:initiative/rounds scene)]
+            rounds     (:initiative/rounds scene)
+            blocked    (when (seq walls) (blocked-pairs all-tokens walls doors))]
         (str
          "SCENE: " (or (:scene/label scene) "Unnamed") "\n"
          "GRID SIZE: " gs "px per tile (each tile = 5 feet)\n"
+         (when (or (seq walls) (seq doors))
+           (str "MAP GEOMETRY: " (count walls) " wall segments, "
+                (count doors) " doors (" closed-doors " closed)\n"
+                "  Tokens cannot move through walls or closed doors.\n"))
          "\nPLAYER TOKENS (do NOT move or remove these):\n"
          (if (seq players)
-           (apply str (map format-token players))
+           (apply str (map #(format-token % walls) players))
            "  (none)\n")
          "\nNPC/MONSTER TOKENS (you control these):\n"
          (if (seq npcs)
-           (apply str (map format-token npcs))
+           (apply str (map #(format-token % walls) npcs))
            "  (none)\n")
+         (when (seq blocked)
+           (str "\nBLOCKED LINE OF SIGHT (these pairs cannot see each other):\n"
+                (apply str (map format-blocked-pair blocked))))
          (when (seq initiative)
            (str
             "\nINITIATIVE TRACKER:\n"
@@ -87,6 +140,8 @@
    "- Snap token positions to grid centers: x = col * " scene-grid-size " + " (/ scene-grid-size 2)
    ", y = row * " scene-grid-size " + " (/ scene-grid-size 2) ".\n"
    "- Token IDs are integers. Use the exact IDs from the game state below.\n"
+   "- If the map has walls or closed doors, movement attempts that cross them will be rejected. Pick a path that goes around obstacles.\n"
+   "- Use BLOCKED LINE OF SIGHT data: a token cannot see or shoot through a wall. An NPC should not act on information its line of sight does not give it.\n"
    "- If there is nothing to do, call narrate with brief flavor text and no other tools.\n"
    "\n"
    "CURRENT GAME STATE:\n"

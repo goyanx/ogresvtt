@@ -1,0 +1,73 @@
+(ns tool-dispatch-test
+  (:require [cljs.test :refer-macros [deftest is testing]]
+            [datascript.core :as ds]
+            [ogres.app.ai.tool-dispatch :as td]
+            [ogres.app.const :refer [grid-size]]
+            [ogres.app.provider.state :refer [initial-data]]
+            [ogres.app.vec :as vec :refer [Vec2]]))
+
+(defn- build-scene
+  "Builds a DataScript db with a single scene, a single NPC token at
+   the given position, and optional walls and doors. Returns
+   [db token-id]."
+  [& {:keys [token-pos walls doors]
+      :or {token-pos (Vec2. 35 35) walls [] doors []}}]
+  (let [db0   (initial-data true)
+        user  (ds/entity db0 [:db/ident :user])
+        sid   (:db/id (:camera/scene (:user/camera user)))
+        tx    [{:db/id sid
+                :scene/walls walls
+                :scene/doors doors
+                :scene/tokens
+                [{:db/id -10
+                  :object/type :token/token
+                  :object/point token-pos
+                  :token/label "Goblin"}]}]
+        report (ds/with db0 tx)
+        db     (:db-after report)
+        token-id (get (:tempids report) -10)]
+    [db token-id]))
+
+(defn- captured-dispatcher []
+  (let [captured (atom [])]
+    [captured
+     (fn [& args] (swap! captured conj args))]))
+
+(deftest move-token-respects-walls
+  (testing "move_token succeeds when path is clear"
+    (let [[db tid] (build-scene :token-pos (Vec2. 35 35))
+          [log dispatch] (captured-dispatcher)
+          r  (td/dispatch-tool dispatch db "move_token"
+                               {:token_id tid :x 175 :y 35} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))))
+  (testing "move_token fails when a wall blocks the path"
+    (let [walls [[100 0 100 200]]
+          [db tid] (build-scene :token-pos (Vec2. 35 35) :walls walls)
+          [log dispatch] (captured-dispatcher)
+          r  (td/dispatch-tool dispatch db "move_token"
+                               {:token_id tid :x 175 :y 35} {})]
+      (is (not (:ok r)))
+      (is (zero? (count @log))
+          "No dispatch is called when the path is blocked.")))
+  (testing "closed door blocks movement; open door does not"
+    (let [[db-c tid-c] (build-scene :token-pos (Vec2. 35 35)
+                                    :doors [{:closed true  :segments [[100 0 100 200]]}])
+          [db-o tid-o] (build-scene :token-pos (Vec2. 35 35)
+                                    :doors [{:closed false :segments [[100 0 100 200]]}])
+          [_ d1] (captured-dispatcher)
+          [_ d2] (captured-dispatcher)]
+      (is (not (:ok (td/dispatch-tool d1 db-c "move_token"
+                                       {:token_id tid-c :x 175 :y 35} {}))))
+      (is (:ok (td/dispatch-tool d2 db-o "move_token"
+                                  {:token_id tid-o :x 175 :y 35} {}))))))
+
+(deftest move-player-token-respects-walls
+  (testing "move_player_token fails when path crosses a wall"
+    (let [walls [[100 0 100 200]]
+          [db tid] (build-scene :token-pos (Vec2. 35 35) :walls walls)
+          [log dispatch] (captured-dispatcher)
+          r  (td/dispatch-tool dispatch db "move_player_token"
+                               {:token_id tid :direction "east" :squares 3} {})]
+      (is (not (:ok r)))
+      (is (zero? (count @log))))))
