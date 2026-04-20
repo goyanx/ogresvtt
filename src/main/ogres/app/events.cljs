@@ -313,6 +313,21 @@
          (apply concat))))
 
 (defmethod
+  ^{:doc "Toggles the :closed flag of the door at the given index in the
+          current scene's :scene/doors vector. Out-of-range indexes are
+          ignored so the caller can fail soft."}
+  event-tx-fn :scene/set-door-state
+  [data _ door-index closed?]
+  (let [user  (ds/entity data [:db/ident :user])
+        scene (:camera/scene (:user/camera user))
+        sid   (:db/id scene)
+        doors (vec (:scene/doors scene))]
+    (if (and sid (<= 0 door-index) (< door-index (count doors)))
+      [[:db/add sid :scene/doors
+        (assoc-in doors [door-index :closed] (boolean closed?))]]
+      [])))
+
+(defmethod
   ^{:doc "Imports a Universal VTT (.dd2vtt / .uvtt) map: adds the embedded
           image to the scene-images list, creates a new scene with that
           image, `:scene/walls`, `:scene/doors`, and `:scene/grid-size`

@@ -71,3 +71,42 @@
                                {:token_id tid :direction "east" :squares 3} {})]
       (is (not (:ok r)))
       (is (zero? (count @log))))))
+
+(deftest plan-path-tool
+  (testing "returns waypoints when a path exists"
+    (let [[db _] (build-scene)
+          r  (td/dispatch-tool (fn [& _]) db "plan_path"
+                               {:from_x 35 :from_y 35
+                                :to_x 245 :to_y 35} {})]
+      (is (:ok r))
+      (is (vector? (:waypoints r)))
+      (is (>= (count (:waypoints r)) 2))))
+  (testing "returns an error when the goal is unreachable"
+    ;; Box the start in with walls.
+    (let [walls [[0 0 70 0] [70 0 70 70] [0 70 70 70] [0 0 0 70]]
+          [db _] (build-scene :walls walls)
+          r  (td/dispatch-tool (fn [& _]) db "plan_path"
+                               {:from_x 35 :from_y 35
+                                :to_x 500 :to_y 35} {})]
+      (is (not (:ok r))))))
+
+(deftest set-door-state-tool
+  (testing "valid index dispatches the state change event"
+    (let [[db _] (build-scene
+                  :doors [{:closed true :segments [[0 0 10 10]]}])
+          [log dispatch] (captured-dispatcher)
+          r  (td/dispatch-tool dispatch db "set_door_state"
+                               {:door_index 0 :closed false} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))
+      (let [[topic idx closed?] (first @log)]
+        (is (= :scene/set-door-state topic))
+        (is (= 0 idx))
+        (is (false? closed?)))))
+  (testing "out-of-range index fails without dispatching"
+    (let [[db _] (build-scene :doors [])
+          [log dispatch] (captured-dispatcher)
+          r  (td/dispatch-tool dispatch db "set_door_state"
+                               {:door_index 5 :closed true} {})]
+      (is (not (:ok r)))
+      (is (zero? (count @log))))))

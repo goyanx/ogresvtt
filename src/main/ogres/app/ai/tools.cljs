@@ -95,4 +95,26 @@
     {:name "advance_turn"
      :description "Advance the initiative tracker to the next combatant's turn."
      :parameters
-     {:type "object" :properties {}}}}])
+     {:type "object" :properties {}}}}
+   {:type "function"
+    :function
+    {:name "plan_path"
+     :description "Compute a walkable route from one point to another that avoids walls and closed doors. Returns an ordered list of pixel waypoints [[x y] ...] or an error if no path exists. Use this before move_token when the map has walls and a straight line would be blocked."
+     :parameters
+     {:type "object"
+      :properties
+      {:from_x {:type "integer" :description "Start x position in pixels."}
+       :from_y {:type "integer" :description "Start y position in pixels."}
+       :to_x   {:type "integer" :description "Goal x position in pixels."}
+       :to_y   {:type "integer" :description "Goal y position in pixels."}}
+      :required ["from_x" "from_y" "to_x" "to_y"]}}}
+   {:type "function"
+    :function
+    {:name "set_door_state"
+     :description "Open or close a door on the map by its index (0-based, matching the order doors appear in the MAP GEOMETRY). Open doors let tokens and line-of-sight pass through; closed doors block both."
+     :parameters
+     {:type "object"
+      :properties
+      {:door_index {:type "integer" :description "Index of the door in scene.doors (0-based)."}
+       :closed     {:type "boolean" :description "true to close the door, false to open it."}}
+      :required ["door_index" "closed"]}}}])

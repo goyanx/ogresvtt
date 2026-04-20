@@ -2,6 +2,7 @@
   (:require [datascript.core :as ds]
             [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size half-size]]
+            [ogres.app.pathfind :as pathfind]
             [ogres.app.vec :refer [Vec2]]))
 
 (defn ^:private scene-geometry
@@ -141,6 +142,24 @@
   [dispatch _db _ _args _opts]
   (dispatch :initiative/next)
   {:ok true})
+
+(defmethod dispatch-tool "plan_path"
+  [_dispatch db _ {:keys [from_x from_y to_x to_y]} _opts]
+  (let [[walls doors] (scene-geometry db)]
+    (if-let [waypoints (pathfind/path-waypoints
+                        walls doors from_x from_y to_x to_y)]
+      {:ok true :waypoints waypoints}
+      {:ok false :reason "No walkable path found between those points."})))
+
+(defmethod dispatch-tool "set_door_state"
+  [dispatch db _ {:keys [door_index closed]} _opts]
+  (let [[_ doors] (scene-geometry db)]
+    (if (and (integer? door_index)
+             (<= 0 door_index)
+             (< door_index (count doors)))
+      (do (dispatch :scene/set-door-state door_index (boolean closed))
+          {:ok true})
+      {:ok false :reason (str "No door with index " door_index ".")})))
 
 (defmethod dispatch-tool :default
   [_ _ tool-name _ _opts]

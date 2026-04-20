@@ -221,15 +221,17 @@
                :mask-remove (dispatch :mask/remove id)))})))))
 
 (def ^:private walls-query
-  [{:user/camera
+  [:user/host
+   {:user/camera
     [{:camera/scene
       [[:scene/walls :default []]
        [:scene/doors :default []]]}]}])
 
 (defui ^:private walls []
   (let [result (hooks/use-query walls-query)
-        {{{segs :scene/walls doors :scene/doors} :camera/scene} :user/camera} result]
-    (when (or (seq segs) (seq doors))
+        {host :user/host
+         {{segs :scene/walls doors :scene/doors} :camera/scene} :user/camera} result]
+    (when (and host (or (seq segs) (seq doors)))
       ($ :g.scene-walls
         {:style {:pointer-events "none"}}
         (for [[i [x1 y1 x2 y2]] (map-indexed vector segs)]
