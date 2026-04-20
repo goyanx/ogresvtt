@@ -1,5 +1,6 @@
 (ns ogres.app.provider.image
   (:require [datascript.core :as ds]
+            [ogres.app.dd2vtt :as dd2vtt]
             [ogres.app.provider.dispatch :refer [use-dispatch]]
             [ogres.app.provider.events :as events]
             [ogres.app.provider.idb :as idb]
@@ -224,6 +225,44 @@
                (fn [files]
                  (doseq [[_ image _] files]
                    (publish :image/create (:data image)))))))))
+
+(defn use-uvtt-uploader
+  "React hook which returns a function that accepts one or more
+   Universal VTT files (.dd2vtt / .uvtt / .df2vtt), parses each to
+   extract the embedded image plus wall and door geometry, persists the
+   images to IndexedDB, and dispatches a `:scene/import-uvtt` event to
+   create a new scene with the geometry pre-populated."
+  []
+  (let [dispatch (use-dispatch)
+        entity   (state/use-query [:user/host])
+        write    (idb/use-writer "images")]
+    (if (:user/host entity)
+      (fn [files]
+        (-> (js/Promise.all
+             (into-array
+              (map (fn [file]
+                     (.then (dd2vtt/parse-file file)
+                            (fn [parsed]
+                              (.then (process-file (:image-file parsed))
+                                     (fn [processed]
+                                       [parsed processed])))))
+                   files)))
+            (.then
+             (fn [^js results]
+               (let [pairs (vec results)
+                     records (into []
+                                   (mapcat (fn [[_ proc]] (create-store-records proc)))
+                                   pairs)]
+                 (.then (write :put records) (constantly pairs)))))
+            (.then
+             (fn [pairs]
+               (doseq [[parsed proc] pairs
+                       :let [state-rec (create-state-records proc)
+                             walls     (:walls parsed)
+                             doors     (:doors parsed)
+                             grid      (:grid-size parsed)]]
+                 (dispatch :scene/import-uvtt state-rec walls doors grid))))))
+      (constantly nil))))
 
 (defn use-image
   "React hook which accepts a string that uniquely identifies an image

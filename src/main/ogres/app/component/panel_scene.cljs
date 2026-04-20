@@ -2,6 +2,7 @@
   (:require [clojure.string :refer [replace]]
             [ogres.app.component :as component :refer [icon]]
             [ogres.app.const :refer [grid-size]]
+            [ogres.app.dd2vtt :as dd2vtt]
             [ogres.app.hooks :as hooks]
             [ogres.app.util :refer [display-size]]
             [uix.core :as uix :refer [defui $]]))
@@ -120,6 +121,7 @@
   (let [[preview set-preview] (uix/use-state nil)
         dispatch (hooks/use-dispatch)
         upload   (hooks/use-image-uploader {:type :scene})
+        upload-uvtt (hooks/use-uvtt-uploader)
         input    (uix/use-ref)
         data     (hooks/use-query query [:db/ident :root])
         {{{scene :camera/scene} :user/camera
@@ -204,11 +206,15 @@
                       {:ref input
                        :type "file"
                        :hidden true
-                       :accept "image/*"
+                       :accept "image/*,.dd2vtt,.uvtt,.df2vtt"
                        :multiple true
                        :on-change
                        (fn [event]
-                         (upload (.. event -target -files))
+                         (let [all (array-seq (.. event -target -files))
+                               uvtts (filter dd2vtt/universal-vtt-file? all)
+                               imgs  (remove dd2vtt/universal-vtt-file? all)]
+                           (when (seq imgs) (upload (into-array imgs)))
+                           (when (seq uvtts) (upload-uvtt uvtts)))
                          (set! (.. event -target -value) ""))})
                     ($ icon {:name "camera-fill" :size 16}) "Upload images")
                   (if (> pages 1)

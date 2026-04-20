@@ -312,6 +312,53 @@
               [:db/add -3 :camera/point vec/zero]]))
          (apply concat))))
 
+(defmethod
+  ^{:doc "Imports a Universal VTT (.dd2vtt / .uvtt) map: adds the embedded
+          image to the scene-images list, creates a new scene with that
+          image, `:scene/walls`, `:scene/doors`, and `:scene/grid-size`
+          pre-populated, and switches the local user to it.
+
+          `state-rec` is a two-element vector [image-record thumbnail-record]
+          as produced by the image upload pipeline. `walls` is a vector of
+          [x1 y1 x2 y2] line segments. `doors` is a vector of
+          {:closed bool :segments [...]} maps. `size` is the grid cell
+          size in internal pixels."}
+  event-tx-fn :scene/import-uvtt
+  [_ _ state-rec walls doors size]
+  (let [[image thumb] state-rec
+        image-tx (if (= (:hash image) (:hash thumb))
+                   [{:image/hash (:hash image)
+                     :image/name (:name image)
+                     :image/size (:size image)
+                     :image/width (:width image)
+                     :image/height (:height image)
+                     :image/thumbnail [:image/hash (:hash image)]}]
+                   [{:image/hash (:hash thumb)
+                     :image/name (:name thumb)
+                     :image/size (:size thumb)
+                     :image/width (:width thumb)
+                     :image/height (:height thumb)}
+                    {:image/hash (:hash image)
+                     :image/name (:name image)
+                     :image/size (:size image)
+                     :image/width (:width image)
+                     :image/height (:height image)
+                     :image/thumbnail [:image/hash (:hash thumb)]}])]
+    [{:db/ident :root
+      :root/scene-images image-tx}
+     [:db/add -1 :db/ident :root]
+     [:db/add -1 :root/scenes -2]
+     [:db/add -2 :scene/image [:image/hash (:hash image)]]
+     [:db/add -2 :scene/grid-size size]
+     [:db/add -2 :scene/walls walls]
+     [:db/add -2 :scene/doors (vec doors)]
+     [:db/add -1 :root/user -3]
+     [:db/add -3 :db/ident :user]
+     [:db/add -3 :user/camera -4]
+     [:db/add -3 :user/cameras -4]
+     [:db/add -4 :camera/scene -2]
+     [:db/add -4 :camera/point vec/zero]]))
+
 ;; -- Scene Images --
 (defmethod event-tx-fn :scene-images/create-many
   [_ _ images]

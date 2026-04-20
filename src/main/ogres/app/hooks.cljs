@@ -61,6 +61,12 @@
   use-image-uploader
   provider.image/use-image-uploader)
 
+(def ^{:doc "Returns a function which accepts one or more Universal VTT
+             File objects (.dd2vtt / .uvtt / .df2vtt) and creates a new
+             scene for each, with the embedded image, walls, and doors."}
+  use-uvtt-uploader
+  provider.image/use-uvtt-uploader)
+
 (def ^{:doc "Creates a new portal element of name `label` with contents
              rendered by `render-fn`. This portal can then be rendered
              into with `use-portal`."

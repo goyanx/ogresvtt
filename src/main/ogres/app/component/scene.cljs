@@ -220,6 +220,35 @@
                :mask-toggle (dispatch :mask/toggle id (not enabled?))
                :mask-remove (dispatch :mask/remove id)))})))))
 
+(def ^:private walls-query
+  [{:user/camera
+    [{:camera/scene
+      [[:scene/walls :default []]
+       [:scene/doors :default []]]}]}])
+
+(defui ^:private walls []
+  (let [result (hooks/use-query walls-query)
+        {{{segs :scene/walls doors :scene/doors} :camera/scene} :user/camera} result]
+    (when (or (seq segs) (seq doors))
+      ($ :g.scene-walls
+        {:style {:pointer-events "none"}}
+        (for [[i [x1 y1 x2 y2]] (map-indexed vector segs)]
+          ($ :line
+            {:key (str "w" i)
+             :x1 x1 :y1 y1 :x2 x2 :y2 y2
+             :stroke "#d33"
+             :stroke-width 2
+             :stroke-linecap "round"}))
+        (for [[i door] (map-indexed vector doors)
+              [j [x1 y1 x2 y2]] (map-indexed vector (:segments door))]
+          ($ :line
+            {:key (str "d" i "-" j)
+             :x1 x1 :y1 y1 :x2 x2 :y2 y2
+             :stroke (if (:closed door) "#c90" "#6c6")
+             :stroke-width 2
+             :stroke-dasharray "6 4"
+             :stroke-linecap "round"}))))))
+
 (defui ^:private grid-defs []
   ($ :defs
     ($ :pattern
@@ -440,7 +469,8 @@
       ($ :g.scene-interior
         ($ :use.scene-image {:href "#scene-image"})
         ($ :use.scene-grid {:href "#scene-grid"})
-        ($ objects))
+        ($ objects)
+        ($ walls))
 
       ;; Portal target for the host's cursor which must remain obscured
       ;; by visibility controls so that nosey players don't get any
