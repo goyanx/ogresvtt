@@ -11,6 +11,10 @@ Start with:
   uvicorn ai_dm.main:app --port 8765 --reload
 """
 import functools
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -18,6 +22,42 @@ from pydantic import BaseModel
 
 from ai_dm.graph import build_graph
 from ai_dm.backends import ollama, grok
+
+
+def _load_env_files() -> None:
+    here = Path(__file__).resolve()
+    candidates = [
+        Path.cwd() / ".env.local",
+        Path.cwd() / ".env",
+        here.parent / ".env.local",
+        here.parent / ".env",
+        here.parents[1] / ".env.local",
+        here.parents[1] / ".env",
+    ]
+    for env_file in candidates:
+        if env_file.exists():
+            load_dotenv(env_file, override=False)
+
+
+def _env_first(*keys: str, default: str = "") -> str:
+    for key in keys:
+        value = os.getenv(key)
+        if value:
+            return value
+    return default
+
+
+_load_env_files()
+
+DEFAULT_OLLAMA_ENDPOINT = _env_first(
+    "AI_DM_OLLAMA_ENDPOINT", "OLLAMA_ENDPOINT", default="http://localhost:11434"
+)
+DEFAULT_OLLAMA_MODEL = _env_first(
+    "AI_DM_OLLAMA_MODEL", "OLLAMA_MODEL", default="qwen2.5:14b-instruct-q4_K_M"
+)
+DEFAULT_GROK_MODEL = _env_first(
+    "AI_DM_GROK_MODEL", "GROK_MODEL", "XAI_MODEL", default="grok-3-mini"
+)
 
 app = FastAPI(title="AI DM LangGraph Sidecar")
 
@@ -35,8 +75,8 @@ app.add_middleware(
 
 class TurnRequest(BaseModel):
     backend: str = "ollama"
-    endpoint: str = "http://localhost:11434"
-    model: str = "qwen2.5:14b-instruct-q4_K_M"
+    endpoint: str = ""
+    model: str = ""
     api_key: str = ""
     scenario: str = ""
     game_state: str = ""
@@ -52,15 +92,23 @@ class TurnResponse(BaseModel):
 
 @app.post("/dm/turn", response_model=TurnResponse)
 async def dm_turn(req: TurnRequest):
-    if req.backend == "ollama":
+    backend = (req.backend or "ollama").strip().lower()
+    if backend == "ollama":
+        endpoint = (req.endpoint or DEFAULT_OLLAMA_ENDPOINT).strip()
+        model = (req.model or DEFAULT_OLLAMA_MODEL).strip()
         llm_call = functools.partial(
-            ollama.chat_completion, endpoint=req.endpoint, model=req.model
+            ollama.chat_completion, endpoint=endpoint, model=model
         )
-    elif req.backend == "grok":
-        if not req.api_key:
+    elif backend == "grok":
+        api_key = (
+            req.api_key
+            or _env_first("XAI_API_KEY", "GROK_API_KEY", "AI_DM_GROK_API_KEY")
+        ).strip()
+        model = (req.model or DEFAULT_GROK_MODEL).strip()
+        if not api_key:
             raise HTTPException(status_code=400, detail="api_key required for grok backend")
         llm_call = functools.partial(
-            grok.chat_completion, api_key=req.api_key, model=req.model
+            grok.chat_completion, api_key=api_key, model=model
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unknown backend: {req.backend}")
@@ -142,4 +190,12 @@ def health():
         import kokoro  # noqa: F401
     except ImportError:
         tts_available = False
-    return {"status": "ok", "tts": tts_available}
+    return {
+        "status": "ok",
+        "tts": tts_available,
+        "defaults": {
+            "ollama_endpoint": DEFAULT_OLLAMA_ENDPOINT,
+            "ollama_model": DEFAULT_OLLAMA_MODEL,
+            "grok_model": DEFAULT_GROK_MODEL,
+        },
+    }

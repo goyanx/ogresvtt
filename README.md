@@ -71,84 +71,66 @@
 
 ---
 
-## Development Setup (Windows)
+## Configure and Run (Windows)
 
-### Prerequisites
+### 1) Prerequisites
 
-| Tool | Install |
-|------|---------|
-| **Node.js** | [nodejs.org](https://nodejs.org/) |
-| **Java JDK 21** | [Eclipse Temurin](https://adoptium.net/) |
-| **Clojure** | PowerShell (run as Administrator): `iwr -useb download.clojure.org/install/win-install-1.11.1.1165.ps1 \| iex` |
-| **Python 3.11+** | [python.org](https://www.python.org/) — only needed for AI DM sidecar |
+| Tool | Required For | Install |
+|------|--------------|---------|
+| **Node.js** | Frontend | [nodejs.org](https://nodejs.org/) |
+| **Java JDK 21** | Frontend build (`shadow-cljs`) | [Eclipse Temurin](https://adoptium.net/) |
+| **Clojure** | Multiplayer backend server | PowerShell (Admin): `iwr -useb download.clojure.org/install/win-install-1.11.1.1165.ps1 \| iex` |
+| **Python 3.11+** | LangGraph sidecar / voice | [python.org](https://www.python.org/) |
 
-### Frontend (ClojureScript)
+### 2) Clone and install dependencies
 
 ```powershell
-# Clone the repository
 git clone https://github.com/goyanx/ogresvtt.git
 cd ogresvtt
-
-# Switch to the AI DM feature branch
-git checkout claude/ai-dungeon-master-prd-xJuMc
-
-# Install JS dependencies
 npm install
-
-# Start the frontend dev server (hot reload at http://localhost:8080)
-npx shadow-cljs watch app
-```
-
-### Backend (Clojure game server)
-
-The backend is only needed for **multiplayer** online sessions. Solo/local play works without it.
-
-```powershell
-# In a separate terminal
-clojure -M -m ogres.server.core 5000
-```
-
-Logs are written to `logs/ogres.log`. Create the directory first:
-
-```powershell
 mkdir logs
 ```
 
----
+### 3) Run the project
 
-## AI Dungeon Master Setup
+Start frontend (required):
 
-The AI DM runs entirely in the host's browser. The LLM backend is your choice.
+```powershell
+npx shadow-cljs watch app
+```
 
-### Option A — Ollama (local, recommended for privacy)
+Start backend (optional, only for multiplayer sessions):
 
-1. Install [Ollama](https://ollama.com) and pull a tool-capable model:
-   ```powershell
-   ollama pull qwen2.5:14b-instruct-q4_K_M
-   ```
+```powershell
+clojure -M -m ogres.server.core 5000
+```
 
-2. Start Ollama with CORS enabled (required for browser fetch):
-   ```powershell
-   $env:OLLAMA_ORIGINS="*"
-   ollama serve
-   ```
+Open `http://localhost:8080`.
 
-3. In OgresVTT open the **wand icon** panel → set:
-   - Backend: `Ollama (local, direct)`
-   - Endpoint: `http://localhost:11434`
-   - Model: `qwen2.5:14b-instruct-q4_K_M`
+### 4) Choose your runtime mode
 
-### Option B — Grok xAI (cloud)
+| Mode | Extra Process Needed | In-app AI DM Backend | Notes |
+|------|----------------------|----------------------|-------|
+| Solo/local tabletop (no AI) | none | disabled | Fastest setup |
+| AI Direct + Ollama | `ollama serve` | `Ollama (local, direct)` | Local/private |
+| AI Direct + Grok | none | `Grok (xAI, direct)` | API key stored in browser localStorage |
+| AI LangGraph + Ollama | `uvicorn ai_dm.main:app --port 8765 --reload` (+ Ollama) | `LangGraph sidecar` + `Sidecar LLM backend = Ollama` | Multi-step reasoning |
+| AI LangGraph + Grok | `uvicorn ai_dm.main:app --port 8765 --reload` | `LangGraph sidecar` + `Sidecar LLM backend = Grok` | Can use `.env.local` defaults |
 
-1. Get an API key at [console.x.ai](https://console.x.ai)
-2. In OgresVTT open the **wand icon** panel → set:
-   - Backend: `Grok (xAI, direct)`
-   - API Key: your `xai-...` key *(stored in browser only, never sent to the OgresVTT server)*
-   - Model: `grok-3-mini`
+### 5) Ollama setup (if using Ollama)
 
-### Option C — LangGraph Sidecar (multi-step agentic reasoning)
+```powershell
+ollama pull qwen2.5:14b-instruct-q4_K_M
+$env:OLLAMA_ORIGINS="*"
+ollama serve
+```
 
-The sidecar adds a reasoning loop: **assess → plan → validate → reflect/retry** before executing tool calls. Requires Python.
+In OgresVTT AI DM panel:
+- Backend: `Ollama (local, direct)` (or `LangGraph sidecar` + `Sidecar LLM backend = Ollama`)
+- Ollama endpoint: `http://localhost:11434`
+- Model: `qwen2.5:14b-instruct-q4_K_M` (or another tool-capable model)
+
+### 6) LangGraph sidecar setup (optional)
 
 ```powershell
 cd ai_dm
@@ -156,48 +138,56 @@ pip install -r requirements.txt
 uvicorn ai_dm.main:app --port 8765 --reload
 ```
 
-In OgresVTT open the **wand icon** panel → set Backend to `LangGraph sidecar (multi-step)`.
+Then in OgresVTT AI DM panel:
+- Backend: `LangGraph sidecar (multi-step)`
+- Sidecar URL: `http://localhost:8765`
+- Sidecar LLM backend: `Ollama` or `Grok`
 
-### Voice Narration (optional)
+If you use `Sidecar LLM backend = Grok`, you can configure `.env.local` for defaults
+(file can be in repo root or `ai_dm/`, or your current working directory when launching `uvicorn`):
 
-Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) — runs on CPU, no GPU needed.
+```env
+XAI_API_KEY=xai-...
+GROK_MODEL=grok-3-mini
+```
+
+Supported env keys:
+- Grok API key: `XAI_API_KEY` or `GROK_API_KEY` or `AI_DM_GROK_API_KEY`
+- Grok model: `GROK_MODEL` or `XAI_MODEL` or `AI_DM_GROK_MODEL`
+- Ollama endpoint: `AI_DM_OLLAMA_ENDPOINT` or `OLLAMA_ENDPOINT`
+- Ollama model: `AI_DM_OLLAMA_MODEL` or `OLLAMA_MODEL`
+
+### 7) AI DM quick usage
+
+1. Open the **✦ AI DM** panel.
+2. Enable AI DM.
+3. Configure backend/model/scenario.
+4. Click **Run turn** to test.
+5. Enable **Auto-approve** + set interval for autonomous turns.
+6. Use **T (Narration)** panel to view output or chat with the DM.
+
+### 8) Voice narration (optional)
+
+Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M).
 
 ```powershell
 pip install kokoro soundfile numpy
 ```
 
-On Windows, espeak-ng is needed for phonemization. Install it from the
-[espeak-ng releases page](https://github.com/espeak-ng/espeak-ng/releases/latest)
-(download the `.msi` installer). It may work without it for English — try without first.
+Windows phonemization may require espeak-ng:
+[espeak-ng latest releases](https://github.com/espeak-ng/espeak-ng/releases/latest)
 
-Once the sidecar is running, enable **Voice narration** in the AI DM panel and select a voice.
-**George (British male)** is the recommended dungeon master voice.
+### 9) Troubleshooting
 
----
+- `AI DM Error: Grok API key not set`
+  - Direct mode: set key in AI DM panel.
+  - LangGraph mode: set key in panel or `.env.local`.
+- LangGraph cannot connect
+  - Ensure sidecar is running on `http://localhost:8765`.
+- No multiplayer sync
+  - Ensure Clojure backend is running on port `5000`.
 
-## Using the AI Dungeon Master
-
-### Quick Start
-
-1. Load a map scene and place some NPC tokens on the board
-2. Open the **wand icon (✦)** tab → configure backend, model, and scenario
-3. Write a scenario describing your campaign context, e.g.:
-   ```
-   Dark dungeon crawl inside Cragmaw Cave. 4 level-3 adventurers.
-   Goblins and a bugbear patrol the tunnels. Gothic horror tone.
-   Monsters retreat when below half HP. Narrate in second person.
-   ```
-4. Click **Run turn** to test a single manual turn
-5. Enable **Auto-approve** and set a turn interval to run autonomously
-6. Open the **T (narration)** tab to see and hear the DM's narration
-
-### Talking to the DM
-
-With the AI DM enabled, the narration panel input becomes a two-way chat:
-- Type a message and click **Ask** — your message is added to the conversation and the DM responds immediately
-- When disabled the input broadcasts plain host narration to all players
-
-### Panel Reference
+## Panel Reference
 
 | Icon | Panel | Purpose |
 |------|-------|---------|
@@ -216,6 +206,7 @@ With the AI DM enabled, the narration panel input becomes a two-way chat:
 |---------|-------------|
 | **Enable AI DM** | Activates the AI DM |
 | **Backend** | Ollama / Grok / LangGraph sidecar |
+| **Sidecar LLM backend** | In LangGraph mode, selects Ollama or Grok for the sidecar |
 | **Endpoint / Sidecar URL** | URL of your local Ollama or LangGraph server |
 | **Model** | LLM model name (`qwen2.5:14b-instruct-q4_K_M` recommended) |
 | **Scenario** | Free-text campaign context injected into every system prompt |

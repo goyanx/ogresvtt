@@ -19,7 +19,7 @@
         [api-key set-api-key] (uix/use-state #(.getItem js/localStorage "ai-dm-api-key"))]
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
-            {:keys [enabled backend endpoint model scenario auto-approve interval-ms
+            {:keys [enabled backend lg-backend endpoint model scenario auto-approve interval-ms
                     voice-enabled voice-id voice-speed]} config]
         ($ :.ai-dm
           ($ :header
@@ -47,8 +47,24 @@
                 ($ :option {:value "grok"}      "Grok (xAI, direct)")
                 ($ :option {:value "langgraph"} "LangGraph sidecar (multi-step)")))
 
+            ;; LangGraph LLM backend
+            (when (= backend :langgraph)
+              ($ field-row {:label "Sidecar LLM backend"}
+                ($ :select
+                  {:value (name (or lg-backend :ollama))
+                   :on-change #(let [next-backend (keyword (.. % -target -value))]
+                                 (update-config
+                                   (fn [c]
+                                     (cond-> (assoc c :lg-backend next-backend)
+                                       (and (= next-backend :grok)
+                                            (= (:model c) "qwen2.5:14b-instruct-q4_K_M"))
+                                       (assoc :model "")))))}
+                  ($ :option {:value "ollama"} "Ollama")
+                  ($ :option {:value "grok"}   "Grok (xAI)"))))
+
             ;; Ollama endpoint
-            (when (= backend :ollama)
+            (when (or (= backend :ollama)
+                      (and (= backend :langgraph) (= (or lg-backend :ollama) :ollama)))
               ($ field-row {:label "Ollama endpoint"}
                 ($ :input.text
                   {:type "text"
@@ -68,7 +84,8 @@
                                  (fn [c] (assoc c :lg-endpoint (.. % -target -value))))})))
 
             ;; Grok API key
-            (when (= backend :grok)
+            (when (or (= backend :grok)
+                      (and (= backend :langgraph) (= (or lg-backend :ollama) :grok)))
               ($ field-row {:label "Grok API key"}
                 ($ :input.text
                   {:type "password"
@@ -84,7 +101,15 @@
               ($ :input.text
                 {:type "text"
                  :value (or model "")
-                 :placeholder (if (= backend :ollama) "llama3.1" "grok-3-mini")
+                 :placeholder
+                 (let [active-backend (if (= backend :langgraph)
+                                        (or lg-backend :ollama)
+                                        backend)]
+                   (if (= active-backend :grok)
+                     (if (= backend :langgraph)
+                       "grok-3-mini (blank = .env.local)"
+                       "grok-3-mini")
+                     "llama3.1"))
                  :on-change #(update-config
                                (fn [c] (assoc c :model (.. % -target -value))))}))
 
@@ -147,7 +172,7 @@
             (case backend
               :ollama    "Ensure Ollama is running with OLLAMA_ORIGINS=* for CORS support."
               :grok      "Your API key is stored in this browser only and never sent to the OgresVTT server."
-              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload"
+              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload. In Grok mode, leave Model blank to use .env.local defaults."
               ""))))
       ;; Non-host or context not available
       ($ :.ai-dm

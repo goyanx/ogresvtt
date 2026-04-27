@@ -20,6 +20,7 @@
 (def default-config
   {:enabled      false
    :backend      :ollama
+   :lg-backend   :ollama
    :endpoint     "http://localhost:11434"
    :model        "qwen2.5:14b-instruct-q4_K_M"
    :lg-endpoint  "http://localhost:8765"
@@ -37,7 +38,9 @@
     (try
       (let [parsed (js->clj (js/JSON.parse raw) :keywordize-keys true)]
         (merge default-config
-               (update parsed :backend #(if (string? %) (keyword %) %))))
+               (-> parsed
+                   (update :backend #(if (string? %) (keyword %) %))
+                   (update :lg-backend #(if (string? %) (keyword %) %)))))
       (catch :default _ default-config))
     default-config))
 
@@ -45,7 +48,11 @@
   "Persists AI DM configuration to localStorage."
   [config]
   (.setItem js/localStorage "ai-dm-config"
-    (js/JSON.stringify (clj->js (update config :backend name)))))
+    (js/JSON.stringify
+      (clj->js
+        (-> config
+            (update :backend #(if (some? %) (name %) %))
+            (update :lg-backend #(if (some? %) (name %) %)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Context — shared between core and panel components
@@ -70,7 +77,9 @@
                   :messages messages})
     :langgraph (langgraph/chat-completion
                  {:endpoint (:lg-endpoint config)
-                  :model    (:backend config)
+                  :backend  (name (or (:lg-backend config) :ollama))
+                  :model    (:model config)
+                  :ollama-endpoint (:endpoint config)
                   :messages messages})
     (js/Promise.reject (js/Error. (str "Unknown backend: " (:backend config))))))
 
