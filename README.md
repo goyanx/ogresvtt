@@ -263,7 +263,9 @@ python -m ai_dm.ingest_compendium \
   --file C:\path\to\manual.md
 ```
 
-After ingestion, the agent can call `retrieve_rules` and `get_monster_stats` during planning.\n\nSee [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin details.
+After ingestion, the agent can call `retrieve_rules` and `get_monster_stats` during planning.
+
+See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin details.
 
 
 
