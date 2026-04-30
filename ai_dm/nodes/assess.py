@@ -13,7 +13,7 @@ Review the game state below and write a brief (3-5 sentence) internal assessment
 - Are players in danger? Should combat start or continue?
 - What would make this turn dramatic and fun?
 
-Do NOT narrate to players yet. This is internal planning only.
+Do NOT narrate to players yet. This is internal planning only.\nWrite your assessment in English only.
 
 SCENARIO:
 {scenario}
@@ -32,3 +32,4 @@ async def assess(state: DMState, llm_call) -> DMState:
     response = await llm_call(messages, tools=[])
     assessment = response["choices"][0]["message"]["content"] or ""
     return {**state, "plan": assessment}
+

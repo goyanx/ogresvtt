@@ -13,7 +13,7 @@ REFLECT_PROMPT = """Your previous tool calls had the following errors:
 Original game state for reference:
 {game_state}
 
-Please correct the tool calls and try again. Only output valid tool calls.
+Please correct the tool calls and try again. Only output valid tool calls.\nUse English only for any text fields.
 """
 
 
@@ -25,3 +25,4 @@ async def reflect(state: DMState, llm_call) -> DMState:
     message = response["choices"][0]["message"]
     tool_calls = message.get("tool_calls") or []
     return {**state, "tool_calls": tool_calls, "retry_count": state["retry_count"] + 1}
+

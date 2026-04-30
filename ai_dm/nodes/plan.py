@@ -20,7 +20,7 @@ MAX_QUERY_ROUNDS = 3
 PLAN_PROMPT = """You are an AI Dungeon Master.
 Based on the assessment below, call the appropriate tools to run this turn.
 You may first call list_tokens to confirm who is on the board.
-Then call 'narrate' once plus any movement/combat/spawn tools needed.
+Then call 'narrate' once plus any movement/combat/spawn tools needed.\nAll output must be English only, including narration text and any freeform tool arguments.
 
 ASSESSMENT:
 {plan}
@@ -65,3 +65,4 @@ async def plan(state: DMState, llm_call) -> DMState:
 
     # Exhausted query rounds — return whatever action calls we have
     return {**state, "tool_calls": action_calls, "narration": content}
+

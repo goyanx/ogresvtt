@@ -11,17 +11,19 @@ Start with:
   uvicorn ai_dm.main:app --port 8765 --reload
 """
 import functools
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ai_dm.graph import build_graph
 from ai_dm.backends import ollama, grok
+from ai_dm.logging_config import configure_logging
 
 
 def _load_env_files() -> None:
@@ -48,6 +50,8 @@ def _env_first(*keys: str, default: str = "") -> str:
 
 
 _load_env_files()
+log_path = configure_logging()
+logger = logging.getLogger("ai_dm.main")
 
 DEFAULT_OLLAMA_ENDPOINT = _env_first(
     "AI_DM_OLLAMA_ENDPOINT", "OLLAMA_ENDPOINT", default="http://localhost:11434"
@@ -67,6 +71,19 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _startup():
+    logger.info("AI DM sidecar startup complete log_file=%s", log_path)
+
+
+@app.middleware("http")
+async def _request_logging(request: Request, call_next):
+    response = await call_next(request)
+    logger.info("request completed method=%s path=%s status=%s",
+                request.method, request.url.path, response.status_code)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -113,22 +130,40 @@ async def dm_turn(req: TurnRequest):
     else:
         raise HTTPException(status_code=400, detail=f"Unknown backend: {req.backend}")
 
+    logger.info(
+        "dm_turn start backend=%s model=%s endpoint=%s history_count=%s game_state_chars=%s",
+        backend,
+        model,
+        endpoint if backend == "ollama" else "-",
+        len(req.history),
+        len(req.game_state or ""),
+    )
+
     graph = build_graph(llm_call)
     initial_state = {
-        "scenario":          req.scenario,
-        "game_state":        req.game_state,
-        "history":           req.history,
-        "plan":              "",
-        "tool_calls":        [],
+        "scenario": req.scenario,
+        "game_state": req.game_state,
+        "history": req.history,
+        "plan": "",
+        "tool_calls": [],
         "validation_errors": [],
-        "retry_count":       0,
-        "narration":         "",
+        "retry_count": 0,
+        "narration": "",
     }
 
     try:
         final_state = await graph.ainvoke(initial_state)
     except Exception as exc:
+        logger.exception("dm_turn failed backend=%s model=%s endpoint=%s", backend, model, req.endpoint)
         raise HTTPException(status_code=500, detail=str(exc))
+
+    logger.info(
+        "dm_turn success tool_calls=%s validation_errors=%s retry_count=%s narration_chars=%s",
+        len(final_state["tool_calls"]),
+        len(final_state["validation_errors"]),
+        final_state["retry_count"],
+        len(final_state["narration"] or ""),
+    )
 
     return TurnResponse(
         tool_calls=final_state["tool_calls"],
@@ -165,6 +200,7 @@ async def dm_speak(req: SpeakRequest):
             detail="Kokoro TTS not installed. Run: pip install kokoro soundfile",
         )
     except Exception as exc:
+        logger.exception("dm_speak failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
     return Response(content=wav_bytes, media_type="audio/wav")

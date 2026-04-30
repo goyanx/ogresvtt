@@ -9,6 +9,29 @@ import json
 import re
 
 
+def _safe_int(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(round(value))
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return int(s)
+        except ValueError:
+            try:
+                return int(round(float(s)))
+            except ValueError:
+                return None
+    return None
+
+
 def _parse_tokens(game_state: str) -> list[dict]:
     """Parse the PLAYER TOKENS and NPC/MONSTER TOKENS sections from game_state."""
     tokens = []
@@ -42,8 +65,11 @@ def _parse_tokens(game_state: str) -> list[dict]:
             if m:
                 coords = m.group(1).split(",")
                 if len(coords) == 2:
-                    token["x"] = int(coords[0].strip())
-                    token["y"] = int(coords[1].strip())
+                    x = _safe_int(coords[0])
+                    y = _safe_int(coords[1])
+                    if x is not None and y is not None:
+                        token["x"] = x
+                        token["y"] = y
 
             m = re.search(r"size:\s*(\d+)ft", line)
             if m:
