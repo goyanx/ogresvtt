@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI DM Database Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --line: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --warn: #f59e0b;
+    }
+    body { margin: 0; font: 14px/1.4 "Segoe UI", sans-serif; color: var(--text); background: radial-gradient(circle at top, #1e293b, #0b1020 55%); }
+    .wrap { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+    .sidebar { border-right: 1px solid var(--line); padding: 12px; background: rgba(17,24,39,.75); }
+    .main { padding: 14px; }
+    h1 { margin: 0 0 8px; font-size: 18px; }
+    .muted { color: var(--muted); }
+    button, select, input, textarea { background: #0b1220; border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 10px; }
+    button { cursor: pointer; }
+    .controls { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+    .table-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 110px); overflow: auto; }
+    .table-btn { text-align: left; width: 100%; }
+    .table-btn.active { border-color: var(--accent); color: var(--accent); }
+    .panel { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: rgba(15,23,42,.7); }
+    .panel + .panel { margin-top: 12px; }
+    .grid { overflow: auto; max-height: 45vh; border: 1px solid var(--line); border-radius: 8px; }
+    table { width: max-content; min-width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #1f2937; padding: 6px 8px; vertical-align: top; }
+    th { position: sticky; top: 0; background: #111827; text-align: left; }
+    code { color: #c4b5fd; }
+    .warn { color: var(--warn); }
+    textarea { width: 100%; min-height: 120px; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="sidebar">
+      <h1>DM DB Admin</h1>
+      <div class="muted" id="dbPath">loading...</div>
+      <div class="controls">
+        <button id="refreshTables">Refresh</button>
+      </div>
+      <div class="table-list" id="tableList"></div>
+    </aside>
+    <main class="main">
+      <section class="panel">
+        <h2 style="margin-top:0">Table Browser</h2>
+        <div class="controls">
+          <span>Table:</span>
+          <code id="activeTable">(none)</code>
+          <span>Limit:</span>
+          <input id="limit" type="number" min="1" max="1000" value="100" style="width:90px" />
+          <button id="loadRows">Load Rows</button>
+        </div>
+        <div class="grid" id="rowsGrid"></div>
+      </section>
+
+
+      <section class="panel">
+        <h2 style="margin-top:0">Map Config Admin</h2>
+        <div class="muted">Stores map path/filename and render config used by DM tools.</div>
+        <div class="controls">
+          <button id="refreshMaps">Refresh Maps</button>
+          <span id="mapsMeta" class="muted"></span>
+        </div>
+        <div class="grid" id="mapsGrid"></div>
+        <h3 style="margin-top:12px">Upsert Map Config</h3>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:8px;">
+          <input id="m_scene_external_id" placeholder="scene_external_id (required)" />
+          <input id="m_name" placeholder="name" />
+          <input id="m_map_file_path" placeholder="map_file_path" />
+          <input id="m_map_file_name" placeholder="map_file_name" />
+          <input id="m_image_hash" placeholder="image_hash" />
+          <input id="m_grid_size" type="number" placeholder="grid_size" />
+          <input id="m_width" type="number" placeholder="width" />
+          <input id="m_height" type="number" placeholder="height" />
+          <input id="m_offset_x" type="number" step="any" placeholder="offset_x" />
+          <input id="m_offset_y" type="number" step="any" placeholder="offset_y" />
+          <input id="m_lighting" placeholder="lighting (revealed|dimmed|hidden)" />
+          <input id="m_config_json" placeholder="config_json" />
+        </div>
+        <div class="controls">
+          <label><input id="m_show_grid" type="checkbox" /> show_grid</label>
+          <label><input id="m_dark_mode" type="checkbox" /> dark_mode</label>
+          <label><input id="m_grid_align" type="checkbox" /> grid_align</label>
+          <label><input id="m_show_object_outlines" type="checkbox" /> show_object_outlines</label>
+          <button id="saveMap">Save Map Config</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 style="margin-top:0">SQL Console</h2>
+        <div class="muted">Read-only by default. Enable writes via env <code>AI_DM_ADMIN_ALLOW_WRITE=true</code>.</div>
+        <textarea id="sql">SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;</textarea>
+        <div class="controls">
+          <button id="runSql">Run SQL</button>
+          <span id="sqlMeta" class="muted"></span>
+        </div>
+        <div class="grid" id="sqlGrid"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const tableList = document.getElementById('tableList');
+    const activeTable = document.getElementById('activeTable');
+    const rowsGrid = document.getElementById('rowsGrid');
+    const sqlGrid = document.getElementById('sqlGrid');
+    const sqlMeta = document.getElementById('sqlMeta');
+    let selectedTable = null;
+
+    function esc(v){
+      if (v === null || v === undefined) return '';
+      return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function renderTable(container, rows){
+      if (!rows || rows.length === 0) { container.innerHTML = '<div class="muted" style="padding:10px">No rows</div>'; return; }
+      const cols = Object.keys(rows[0]);
+      const head = cols.map(c => `<th>${esc(c)}</th>`).join('');
+      const body = rows.map(r => `<tr>${cols.map(c => `<td><pre>${esc(typeof r[c] === 'object' ? JSON.stringify(r[c]) : r[c])}</pre></td>`).join('')}</tr>`).join('');
+      container.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    async function loadTables(){
+      const res = await fetch('/dm-admin/api/tables');
+      const data = await res.json();
+      document.getElementById('dbPath').textContent = data.db_path;
+      tableList.innerHTML = '';
+      data.tables.forEach(t => {
+        const b = document.createElement('button');
+        b.className = 'table-btn' + (selectedTable === t ? ' active' : '');
+        b.textContent = t;
+        b.onclick = () => {
+          selectedTable = t;
+          activeTable.textContent = t;
+          [...tableList.children].forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          loadRows();
+        };
+        tableList.appendChild(b);
+      });
+    }
+
+    async function loadRows(){
+      if (!selectedTable) return;
+      const limit = Number(document.getElementById('limit').value || 100);
+      const res = await fetch(`/dm-admin/api/table/${encodeURIComponent(selectedTable)}?limit=${limit}&offset=0`);
+      const data = await res.json();
+      renderTable(rowsGrid, data.rows);
+    }
+
+
+    function numOrNull(v){
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    async function loadMaps(){
+      const res = await fetch('/dm-admin/api/maps?limit=200');
+      const data = await res.json();
+      document.getElementById('mapsMeta').textContent = `maps=${data.count || 0}`;
+      renderTable(document.getElementById('mapsGrid'), data.maps || []);
+    }
+
+    async function saveMap(){
+      const payload = {
+        scene_external_id: document.getElementById('m_scene_external_id').value.trim(),
+        name: document.getElementById('m_name').value.trim() || null,
+        map_file_path: document.getElementById('m_map_file_path').value.trim() || null,
+        map_file_name: document.getElementById('m_map_file_name').value.trim() || null,
+        image_hash: document.getElementById('m_image_hash').value.trim() || null,
+        grid_size: numOrNull(document.getElementById('m_grid_size').value),
+        width: numOrNull(document.getElementById('m_width').value),
+        height: numOrNull(document.getElementById('m_height').value),
+        offset_x: numOrNull(document.getElementById('m_offset_x').value),
+        offset_y: numOrNull(document.getElementById('m_offset_y').value),
+        lighting: document.getElementById('m_lighting').value.trim() || null,
+        config_json: document.getElementById('m_config_json').value.trim() || null,
+        show_grid: document.getElementById('m_show_grid').checked,
+        dark_mode: document.getElementById('m_dark_mode').checked,
+        grid_align: document.getElementById('m_grid_align').checked,
+        show_object_outlines: document.getElementById('m_show_object_outlines').checked,
+      };
+
+      if (!payload.scene_external_id) {
+        alert('scene_external_id is required');
+        return;
+      }
+
+      const res = await fetch('/dm-admin/api/maps/upsert', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || 'Failed to save map config');
+        return;
+      }
+      await loadMaps();
+      await loadTables();
+    }
+
+    async function runSql(){
+      sqlMeta.textContent = 'running...';
+      const sql = document.getElementById('sql').value;
+      const res = await fetch('/dm-admin/api/query', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sql})
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        sqlMeta.innerHTML = `<span class="warn">${esc(data.detail || 'Query failed')}</span>`;
+        return;
+      }
+      sqlMeta.textContent = `rows=${data.row_count} write=${data.write}`;
+      renderTable(sqlGrid, data.rows || []);
+      loadTables();
+    }
+
+    document.getElementById('refreshTables').onclick = loadTables;
+    document.getElementById('loadRows').onclick = loadRows;
+    document.getElementById('runSql').onclick = runSql;
+    document.getElementById('refreshMaps').onclick = loadMaps;
+    document.getElementById('saveMap').onclick = saveMap;
+    loadTables();
+    loadMaps();
+  </script>
+</body>
+</html>

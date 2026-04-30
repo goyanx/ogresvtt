@@ -16,6 +16,25 @@
       :required []}}}
    {:type "function"
     :function
+    {:name "show_map"
+     :description "Switch or show a map in the app using map metadata/config from the sidecar."
+     :parameters
+     {:type "object"
+      :properties
+      {:scene_external_id {:type "string" :description "Stable map scene identifier."}
+       :name {:type "string" :description "Optional display name."}
+       :map_file_path {:type "string" :description "Source file path for admin/reference."}
+       :map_file_name {:type "string" :description "Source file name for admin/reference."}
+       :image_hash {:type "string" :description "Image hash in scene image library (if available)."}
+       :grid_size {:type "integer" :description "Grid size in pixels."}
+       :show_grid {:type "boolean"}
+       :dark_mode {:type "boolean"}
+       :grid_align {:type "boolean"}
+       :show_object_outlines {:type "boolean"}
+       :lighting {:type "string" :description "revealed|dimmed|hidden"}}
+      :required ["scene_external_id"]}}}
+   {:type "function"
+    :function
     {:name "narrate"
      :description "Emit narration text visible to all players. Call this once per turn."
      :parameters

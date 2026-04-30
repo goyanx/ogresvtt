@@ -7,23 +7,37 @@ Endpoints:
   GET  /dm/voices — List available TTS voices
   GET  /health
 
+Admin:
+  GET  /dm-admin
+  GET  /dm-admin/api/tables
+  GET  /dm-admin/api/table/{name}
+  POST /dm-admin/api/query
+
 Start with:
   uvicorn ai_dm.main:app --port 8765 --reload
 """
+from __future__ import annotations
+
 import functools
 import logging
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from ai_dm.backends import grok, ollama
+from ai_dm.db import get_conn, init_db, list_tables, resolve_db_path
 from ai_dm.graph import build_graph
-from ai_dm.backends import ollama, grok
 from ai_dm.logging_config import configure_logging
+
+
+TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+READONLY_SQL_RE = re.compile(r"^\s*(select|with|pragma|explain)\b", re.IGNORECASE)
 
 
 def _load_env_files() -> None:
@@ -49,9 +63,26 @@ def _env_first(*keys: str, default: str = "") -> str:
     return default
 
 
+def _allow_admin_write() -> bool:
+    raw = os.getenv("AI_DM_ADMIN_ALLOW_WRITE", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _validate_table_name(name: str) -> str:
+    if not TABLE_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="invalid table name")
+    return name
+
+
+def _is_read_only_sql(sql: str) -> bool:
+    return bool(READONLY_SQL_RE.match(sql or ""))
+
+
 _load_env_files()
 log_path = configure_logging()
 logger = logging.getLogger("ai_dm.main")
+DB_PATH = init_db()
+ADMIN_HTML_PATH = Path(__file__).resolve().parent / "static" / "dm_admin.html"
 
 DEFAULT_OLLAMA_ENDPOINT = _env_first(
     "AI_DM_OLLAMA_ENDPOINT", "OLLAMA_ENDPOINT", default="http://localhost:11434"
@@ -75,14 +106,18 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup():
-    logger.info("AI DM sidecar startup complete log_file=%s", log_path)
+    logger.info("AI DM sidecar startup complete log_file=%s db=%s", log_path, DB_PATH)
 
 
 @app.middleware("http")
 async def _request_logging(request: Request, call_next):
     response = await call_next(request)
-    logger.info("request completed method=%s path=%s status=%s",
-                request.method, request.url.path, response.status_code)
+    logger.info(
+        "request completed method=%s path=%s status=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+    )
     return response
 
 
@@ -234,4 +269,175 @@ def health():
             "ollama_model": DEFAULT_OLLAMA_MODEL,
             "grok_model": DEFAULT_GROK_MODEL,
         },
+        "db": {
+            "path": str(resolve_db_path()),
+            "admin_write_enabled": _allow_admin_write(),
+        },
     }
+
+
+# ---------------------------------------------------------------------------
+# /dm-admin
+# ---------------------------------------------------------------------------
+
+class AdminQueryRequest(BaseModel):
+    sql: str
+
+
+class MapConfigRequest(BaseModel):
+    scene_external_id: str
+    name: str | None = None
+    map_file_path: str | None = None
+    map_file_name: str | None = None
+    image_hash: str | None = None
+    width: int | None = None
+    height: int | None = None
+    grid_size: int | None = None
+    offset_x: float | None = None
+    offset_y: float | None = None
+    show_grid: bool | None = None
+    dark_mode: bool | None = None
+    grid_align: bool | None = None
+    show_object_outlines: bool | None = None
+    lighting: str | None = None
+    config_json: str | None = None
+
+
+@app.get("/dm-admin", response_class=HTMLResponse)
+def dm_admin_page():
+    if not ADMIN_HTML_PATH.exists():
+        raise HTTPException(status_code=500, detail="admin page not found")
+    return HTMLResponse(content=ADMIN_HTML_PATH.read_text(encoding="utf-8"))
+
+
+@app.get("/dm-admin/api/tables")
+def dm_admin_tables():
+    return {
+        "db_path": str(resolve_db_path()),
+        "admin_write_enabled": _allow_admin_write(),
+        "tables": list_tables(),
+    }
+
+
+@app.get("/dm-admin/api/table/{table_name}")
+def dm_admin_table_rows(table_name: str, limit: int = 100, offset: int = 0):
+    table = _validate_table_name(table_name)
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+
+    sql = f"SELECT * FROM {table} LIMIT ? OFFSET ?"
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(sql, (limit, offset)).fetchall()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "table": table,
+        "limit": limit,
+        "offset": offset,
+        "row_count": len(rows),
+        "rows": [dict(r) for r in rows],
+    }
+
+@app.get("/dm-admin/api/maps")
+def dm_admin_maps(limit: int = 200):
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM map_scenes ORDER BY updated_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return {"count": len(rows), "maps": [dict(r) for r in rows]}
+
+
+@app.post("/dm-admin/api/maps/upsert")
+def dm_admin_maps_upsert(req: MapConfigRequest):
+    payload = req.model_dump()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM map_scenes WHERE external_scene_id=? LIMIT 1",
+            (payload["scene_external_id"],),
+        ).fetchone()
+        if row is None:
+            cur = conn.execute(
+                "INSERT INTO map_scenes (external_scene_id, name) VALUES (?, ?)",
+                (payload["scene_external_id"], payload.get("name") or payload["scene_external_id"]),
+            )
+            scene_id = cur.lastrowid
+        else:
+            scene_id = row["id"]
+
+        conn.execute(
+            """
+            UPDATE map_scenes
+            SET name=coalesce(?, name),
+                map_file_path=coalesce(?, map_file_path),
+                map_file_name=coalesce(?, map_file_name),
+                image_hash=coalesce(?, image_hash),
+                width=coalesce(?, width),
+                height=coalesce(?, height),
+                grid_size=coalesce(?, grid_size),
+                offset_x=coalesce(?, offset_x),
+                offset_y=coalesce(?, offset_y),
+                show_grid=coalesce(?, show_grid),
+                dark_mode=coalesce(?, dark_mode),
+                grid_align=coalesce(?, grid_align),
+                show_object_outlines=coalesce(?, show_object_outlines),
+                lighting=coalesce(?, lighting),
+                config_json=coalesce(?, config_json),
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                payload.get("name"),
+                payload.get("map_file_path"),
+                payload.get("map_file_name"),
+                payload.get("image_hash"),
+                payload.get("width"),
+                payload.get("height"),
+                payload.get("grid_size"),
+                payload.get("offset_x"),
+                payload.get("offset_y"),
+                1 if payload.get("show_grid") is True else 0 if payload.get("show_grid") is False else None,
+                1 if payload.get("dark_mode") is True else 0 if payload.get("dark_mode") is False else None,
+                1 if payload.get("grid_align") is True else 0 if payload.get("grid_align") is False else None,
+                1 if payload.get("show_object_outlines") is True else 0 if payload.get("show_object_outlines") is False else None,
+                payload.get("lighting"),
+                payload.get("config_json"),
+                scene_id,
+            ),
+        )
+        row = conn.execute("SELECT * FROM map_scenes WHERE id=?", (scene_id,)).fetchone()
+    return {"status": "ok", "scene": dict(row)}
+
+
+
+@app.post("/dm-admin/api/query")
+def dm_admin_query(req: AdminQueryRequest):
+    sql = (req.sql or "").strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="sql must not be empty")
+    if ";" in sql[:-1]:
+        raise HTTPException(status_code=400, detail="multiple statements are not allowed")
+
+    write_mode = _allow_admin_write()
+    if not write_mode and not _is_read_only_sql(sql):
+        raise HTTPException(
+            status_code=403,
+            detail="write queries disabled. Set AI_DM_ADMIN_ALLOW_WRITE=true to enable",
+        )
+
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(sql)
+            if cur.description is None:
+                conn.commit()
+                return {"write": True, "row_count": cur.rowcount, "rows": []}
+            rows = [dict(r) for r in cur.fetchall()]
+            return {"write": False, "row_count": len(rows), "rows": rows}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

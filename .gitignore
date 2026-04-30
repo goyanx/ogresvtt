@@ -29,3 +29,9 @@ manifest.edn
 cljs-runtime
 ogres.app.js
 ogres.app.css
+
+# Python sidecar artifacts
+__pycache__/
+*.pyc
+ai_dm/data/*.sqlite
+ai_dm/data/*.db

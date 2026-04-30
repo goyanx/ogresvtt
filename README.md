@@ -229,3 +229,42 @@ For full configuration options see the [wiki docs](https://github.com/samcf/ogre
 ## Contributing
 
 Interested in helping fix bugs or extending features? Look for issues labeled **beginner friendly** and comment that you'd like to work on it.
+
+### 10) SQLite RAG + Data Admin (LangGraph sidecar)
+
+The sidecar now initializes a local SQLite database for compendium RAG and
+campaign runtime memory (characters, stats, combat events, NPC relationships,
+map triggers, rulings).
+
+Default database path:
+- `ai_dm/data/dm.sqlite`
+
+Optional env vars:
+- `AI_DM_DB_PATH` — override sqlite file path
+- `AI_DM_ADMIN_ALLOW_WRITE=true` — allow write SQL in admin console
+
+Open admin UI:
+- `http://localhost:8765/dm-admin`
+
+Admin APIs:
+- `GET /dm-admin/api/tables`
+- `GET /dm-admin/api/table/{table_name}?limit=100&offset=0`
+- `POST /dm-admin/api/query`
+- `GET /dm-admin/api/maps?limit=200`
+- `POST /dm-admin/api/maps/upsert`
+
+Ingest handpicked DnD manuals (Markdown/Text) into RAG tables:
+
+```powershell
+python -m ai_dm.ingest_compendium \
+  --source-title "DnD 5.5e Manual" \
+  --edition "5.5e" \
+  --doc-title "PHB" \
+  --file C:\path\to\manual.md
+```
+
+After ingestion, the agent can call `retrieve_rules` and `get_monster_stats` during planning.\n\nSee [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin details.
+
+
+
+LangGraph DM can now emit `show_map` action tool calls to request scene/map switching in the client, backed by `map_scenes` config in SQLite.

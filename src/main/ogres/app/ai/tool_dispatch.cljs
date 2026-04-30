@@ -50,6 +50,11 @@
   [_dispatch _db _ _args _opts]
   {:ok true :note "list_tokens is resolved server-side in LangGraph mode"})
 
+(defmethod dispatch-tool "show_map"
+  [dispatch _db _ args _opts]
+  (dispatch :ai-dm/show-map args)
+  {:ok true :note "map switch/show request dispatched"})
+
 (defmethod dispatch-tool "narrate"
   [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
   (when (seq text)

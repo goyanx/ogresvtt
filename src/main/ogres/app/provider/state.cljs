@@ -26,6 +26,9 @@
    :root/props-images {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/user         {:db/valueType :db.type/ref :db/isComponent true}
    :scene/image       {:db/valueType :db.type/ref}
+   :scene/map-external-id {}
+   :scene/map-file-path {}
+   :scene/map-file-name {}
    :scene/initiative  {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
    :scene/masks       {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :scene/shapes      {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}

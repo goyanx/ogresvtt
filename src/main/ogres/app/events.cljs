@@ -1331,6 +1331,62 @@
   [[:db/retract [:db/ident :root] :root/narration]])
 
 (defmethod
+  ^{:doc "Shows/switches a scene for the AI DM based on map metadata.
+          If scene_external_id matches an existing scene, switch to it;
+          otherwise create a new scene and attach metadata/config."}
+  event-tx-fn :ai-dm/show-map
+  [data _ {:keys [scene_external_id name map_file_path map_file_name image_hash
+                  grid_size show_grid dark_mode grid_align show_object_outlines
+                  lighting]}]
+  (let [user         (ds/entity data [:db/ident :user])
+        root         (ds/entity data [:db/ident :root])
+        root-id      (:db/id root)
+        user-id      (:db/id user)
+        cameras      (:user/cameras user)
+        scene-id
+        (or (when (some? scene_external_id)
+              (ds/q '[:find ?s . :in $ ?ext :where [?s :scene/map-external-id ?ext]]
+                    data scene_external_id))
+            (when (some? map_file_name)
+              (ds/q '[:find ?s . :in $ ?n :where [?s :scene/map-file-name ?n]]
+                    data map_file_name))
+            (when (some? map_file_path)
+              (ds/q '[:find ?s . :in $ ?p :where [?s :scene/map-file-path ?p]]
+                    data map_file_path)))
+        scene-temp   -7001
+        camera-temp  -7002
+        target-scene (or scene-id scene-temp)
+        existing-cam (first (filter (fn [cam]
+                                      (= target-scene
+                                         (:db/id (:camera/scene cam))))
+                                    cameras))
+        target-cam   (or (:db/id existing-cam) camera-temp)
+        light-value  (if (keyword? lighting)
+                       lighting
+                       (when (string? lighting)
+                         (keyword lighting)))
+        scene-map
+        (cond-> {:db/id target-scene}
+          (some? name)                 (assoc :scene/label name)
+          (some? scene_external_id)    (assoc :scene/map-external-id scene_external_id)
+          (some? map_file_path)        (assoc :scene/map-file-path map_file_path)
+          (some? map_file_name)        (assoc :scene/map-file-name map_file_name)
+          (some? grid_size)            (assoc :scene/grid-size grid_size)
+          (some? show_grid)            (assoc :scene/show-grid show_grid)
+          (some? dark_mode)            (assoc :scene/dark-mode dark_mode)
+          (some? grid_align)           (assoc :scene/grid-align grid_align)
+          (some? show_object_outlines) (assoc :scene/show-object-outlines show_object_outlines)
+          (some? light-value)          (assoc :scene/lighting light-value)
+          (and (some? image_hash)
+               (some? (ds/entity data [:image/hash image_hash])))
+          (assoc :scene/image [:image/hash image_hash]))]
+    (cond-> [scene-map
+             {:db/id user-id :user/camera target-cam :user/cameras target-cam}
+             {:db/id target-cam :camera/scene target-scene :camera/point vec/zero}]
+      (nil? scene-id)
+      (conj {:db/id root-id :root/scenes target-scene}))))
+
+(defmethod
   ^{:doc "Spawns a token at a scene-space point. Used by the AI DM tool
           dispatcher which already has scene coordinates, bypassing the
           screen→scene transform in :token/create."}
