@@ -135,5 +135,8 @@ Docs:
     - World-state/trigger agent
     - Narrative director agent
   - Keep existing `execute_query_tool` as fallback compatibility layer during transition.
+- [ ] Automatic SQLite sync hooks from board actions:
+  - Mirror client-dispatched action tools (`move_token`, `update_hp`, `spawn_token`, `remove_token`, initiative actions) into sidecar persistence writes.
+  - Ensure DB continuity does not depend on the LLM explicitly calling persistence query tools.
 - [ ] Add structured evaluation harness for narrative consistency and rule citation quality.
 - [ ] Add migration/version dashboard in `/dm-admin`.

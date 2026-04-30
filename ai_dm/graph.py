@@ -15,6 +15,7 @@ The graph returns the final tool_calls list to the FastAPI handler,
 which serialises them back to the ClojureScript client.
 """
 import functools
+import os
 from langgraph.graph import StateGraph, END
 
 from ai_dm.state import DMState
@@ -23,7 +24,19 @@ from ai_dm.nodes.plan import plan
 from ai_dm.nodes.validate import validate
 from ai_dm.nodes.reflect import reflect
 
-MAX_RETRIES = 2
+
+def _env_int(name: str, default: int, minimum: int = 0, maximum: int = 10) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+MAX_RETRIES = _env_int("AI_DM_MAX_RETRIES", default=2, minimum=0, maximum=10)
 
 
 def _should_retry(state: DMState) -> str:

@@ -133,6 +133,7 @@ In OgresVTT AI DM panel:
 ### 6) LangGraph sidecar setup (optional)
 
 ```powershell
+copy .env.local.example .env.local
 cd ai_dm
 pip install -r requirements.txt
 uvicorn ai_dm.main:app --port 8765 --reload
@@ -152,10 +153,13 @@ GROK_MODEL=grok-3-mini
 ```
 
 Supported env keys:
+- Default sidecar backend: `AI_DM_DEFAULT_BACKEND` (`ollama` or `grok`)
 - Grok API key: `XAI_API_KEY` or `GROK_API_KEY` or `AI_DM_GROK_API_KEY`
 - Grok model: `GROK_MODEL` or `XAI_MODEL` or `AI_DM_GROK_MODEL`
 - Ollama endpoint: `AI_DM_OLLAMA_ENDPOINT` or `OLLAMA_ENDPOINT`
 - Ollama model: `AI_DM_OLLAMA_MODEL` or `OLLAMA_MODEL`
+- Query loop rounds: `AI_DM_MAX_QUERY_ROUNDS` (default `4`)
+- Validation retries: `AI_DM_MAX_RETRIES` (default `2`)
 
 ### 7) AI DM quick usage
 

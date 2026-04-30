@@ -93,6 +93,7 @@ DEFAULT_OLLAMA_MODEL = _env_first(
 DEFAULT_GROK_MODEL = _env_first(
     "AI_DM_GROK_MODEL", "GROK_MODEL", "XAI_MODEL", default="grok-3-mini"
 )
+DEFAULT_BACKEND = _env_first("AI_DM_DEFAULT_BACKEND", default="ollama").strip().lower()
 
 app = FastAPI(title="AI DM LangGraph Sidecar")
 
@@ -126,7 +127,7 @@ async def _request_logging(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 class TurnRequest(BaseModel):
-    backend: str = "ollama"
+    backend: str = ""
     endpoint: str = ""
     model: str = ""
     api_key: str = ""
@@ -144,7 +145,7 @@ class TurnResponse(BaseModel):
 
 @app.post("/dm/turn", response_model=TurnResponse)
 async def dm_turn(req: TurnRequest):
-    backend = (req.backend or "ollama").strip().lower()
+    backend = (req.backend or DEFAULT_BACKEND or "ollama").strip().lower()
     if backend == "ollama":
         endpoint = (req.endpoint or DEFAULT_OLLAMA_ENDPOINT).strip()
         model = (req.model or DEFAULT_OLLAMA_MODEL).strip()

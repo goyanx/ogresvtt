@@ -11,11 +11,24 @@ Loop (max MAX_QUERY_ROUNDS iterations):
   3. If response contains action tools (or no tools) → done, return action tool calls
 """
 import json
+import os
 from ai_dm.state import DMState
 from ai_dm.tools import TOOL_DEFINITIONS, QUERY_TOOLS
 from ai_dm.query_executor import execute_query_tool
 
-MAX_QUERY_ROUNDS = 4
+
+def _env_int(name: str, default: int, minimum: int = 1, maximum: int = 20) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+MAX_QUERY_ROUNDS = _env_int("AI_DM_MAX_QUERY_ROUNDS", default=4, minimum=1, maximum=20)
 
 PLAN_PROMPT = """You are an AI Dungeon Master.
 Based on the assessment below, call the appropriate tools to run this turn.
