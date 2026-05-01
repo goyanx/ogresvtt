@@ -19,6 +19,7 @@ Start with:
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import os
 import re
@@ -76,6 +77,19 @@ def _validate_table_name(name: str) -> str:
 
 def _is_read_only_sql(sql: str) -> bool:
     return bool(READONLY_SQL_RE.match(sql or ""))
+
+
+def _get_or_create_scene(conn, scene_external_id: str) -> int:
+    row = conn.execute(
+        "SELECT id FROM map_scenes WHERE external_scene_id=? LIMIT 1", (scene_external_id,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO map_scenes (external_scene_id, name) VALUES (?, ?)",
+        (scene_external_id, scene_external_id),
+    )
+    return cur.lastrowid
 
 
 _load_env_files()
@@ -304,6 +318,14 @@ class MapConfigRequest(BaseModel):
     config_json: str | None = None
 
 
+class MapRegionRequest(BaseModel):
+    scene_external_id: str
+    region_key: str
+    region_name: str | None = None
+    geometry_json: dict | str
+    tags_json: dict | str | None = None
+
+
 @app.get("/dm-admin", response_class=HTMLResponse)
 def dm_admin_page():
     if not ADMIN_HTML_PATH.exists():
@@ -414,6 +436,54 @@ def dm_admin_maps_upsert(req: MapConfigRequest):
         )
         row = conn.execute("SELECT * FROM map_scenes WHERE id=?", (scene_id,)).fetchone()
     return {"status": "ok", "scene": dict(row)}
+
+
+@app.post("/dm-admin/api/regions/upsert")
+def dm_admin_regions_upsert(req: MapRegionRequest):
+    payload = req.model_dump()
+    ext_id = (payload.get("scene_external_id") or "").strip()
+    region_key = (payload.get("region_key") or "").strip()
+    if not ext_id:
+        raise HTTPException(status_code=400, detail="scene_external_id is required")
+    if not region_key:
+        raise HTTPException(status_code=400, detail="region_key is required")
+
+    geometry = payload.get("geometry_json")
+    tags = payload.get("tags_json")
+    geometry_json = geometry if isinstance(geometry, str) else json.dumps(geometry)
+    tags_json = tags if isinstance(tags, str) else (json.dumps(tags) if tags is not None else None)
+    region_name = payload.get("region_name") or region_key
+
+    with get_conn() as conn:
+        scene_id = _get_or_create_scene(conn, ext_id)
+        row = conn.execute(
+            "SELECT id FROM map_regions WHERE scene_id=? AND region_key=? LIMIT 1",
+            (scene_id, region_key),
+        ).fetchone()
+        if row is None:
+            cur = conn.execute(
+                """
+                INSERT INTO map_regions (scene_id, region_key, region_name, geometry_json, tags_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (scene_id, region_key, region_name, geometry_json, tags_json),
+            )
+            region_id = cur.lastrowid
+        else:
+            region_id = row["id"]
+            conn.execute(
+                """
+                UPDATE map_regions
+                SET region_name=coalesce(?, region_name),
+                    geometry_json=coalesce(?, geometry_json),
+                    tags_json=coalesce(?, tags_json)
+                WHERE id=?
+                """,
+                (region_name, geometry_json, tags_json, region_id),
+            )
+
+        region = conn.execute("SELECT * FROM map_regions WHERE id=?", (region_id,)).fetchone()
+    return {"status": "ok", "region": dict(region)}
 
 
 

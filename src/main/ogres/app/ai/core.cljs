@@ -2,6 +2,7 @@
   "AI Dungeon Master orchestrator. Manages configuration, the turn timer,
    LLM calls, and tool call dispatch. Runs entirely in the host's browser."
   (:require [datascript.core :as ds]
+            [ogres.app.ai.narration :as narration]
             [ogres.app.ai.prompt :as prompt]
             [ogres.app.ai.tool-dispatch :as tool-dispatch]
             [ogres.app.ai.backends.ollama :as ollama]
@@ -115,7 +116,8 @@
                                    {:sidecar-url (:lg-endpoint config)
                                     :voice       (:voice-id config)
                                     :speed       (:voice-speed config)})))]
-              (when (and (seq content) (empty? tool-calls))
+              (when (and (empty? tool-calls)
+                         (narration/narration-text-visible? content))
                 (dispatch :narration/append content "ai")
                 (speak! content))
               (when (seq tool-calls)

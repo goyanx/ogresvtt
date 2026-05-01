@@ -1,5 +1,6 @@
 (ns ogres.app.ai.tool-dispatch
   (:require [datascript.core :as ds]
+            [ogres.app.ai.narration :as narration]
             [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size half-size]]
             [ogres.app.pathfind :as pathfind]
@@ -57,7 +58,7 @@
 
 (defmethod dispatch-tool "narrate"
   [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
-  (when (seq text)
+  (when (narration/narration-text-visible? text)
     (dispatch :narration/append text "ai")
     (when on-narrate (on-narrate text)))
   {:ok true})

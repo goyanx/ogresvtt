@@ -34,7 +34,7 @@ def _extract_player_ids(game_state: str) -> set[int]:
 
 
 def validate(state: DMState) -> DMState:
-    errors = []
+    errors = list(state.get("validation_errors", []))
     known_ids = _extract_token_ids(state["game_state"])
     player_ids = _extract_player_ids(state["game_state"])
 

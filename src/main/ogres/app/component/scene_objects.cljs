@@ -153,7 +153,11 @@
     nil))
 
 (defui ^:private object-shape [props]
-  (let [{{id :db/id shape-pattern :shape/pattern :as entity} :entity} props]
+  (let [{{id :db/id
+          shape-pattern :shape/pattern
+          trigger-label :trigger-area/label
+          [dst] :shape/points
+          :as entity} :entity} props]
     ($ :g.scene-shape {:data-color (:shape/color entity)}
       ($ :defs.scene-shape-defs
         ($ pattern {:id (str "shape-pattern-" id) :name shape-pattern}))
@@ -166,7 +170,15 @@
       ($ :g.scene-shape-path
         {:fill (str "url(#shape-pattern-" id ")")
          :fill-opacity (if (= shape-pattern :solid) 0.40 0.80)}
-        ($ shape props)))))
+        ($ shape props))
+      (if (and (= (:object/type entity) :shape/rect)
+               (string? trigger-label)
+               (not= "" trigger-label)
+               dst)
+        ($ :text.scene-text.scene-text-draw
+          {:x (/ (.-x dst) 2)
+           :y (/ (.-y dst) 2)}
+          trigger-label)))))
 
 (defui ^:private object-token [props]
   ($ :use
@@ -460,11 +472,12 @@
     [:user/host
      [:user/bounds :default seg/zero]
      {:user/camera
-      [:db/id
-       :camera/selected
-       [:camera/scale :default 1]
-       [:camera/point :default vec/zero]
-       {:camera/scene
+     [:db/id
+      :camera/selected
+      [:camera/show-triggers :default true]
+      [:camera/scale :default 1]
+      [:camera/point :default vec/zero]
+      {:camera/scene
         [[:scene/grid-align :default false]
          [:scene/show-object-outlines :default true]
          {:scene/tokens
@@ -486,7 +499,10 @@
            [:object/locked :default false]
            [:shape/points :default [vec/zero]]
            [:shape/color :default "red"]
-           [:shape/pattern :default :solid]]}
+           [:shape/pattern :default :solid]
+           [:trigger-area/label :default ""]
+           :trigger-area/region-key
+           [:trigger-area/enabled? :default false]]}
          {:scene/props
           [:db/id
            [:object/type :default :prop/prop]
@@ -530,6 +546,7 @@
           {point :camera/point
            scale :camera/scale
            selected :camera/selected
+           show-triggers? :camera/show-triggers
            {outline? :scene/show-object-outlines
             align? :scene/grid-align
             shapes :scene/shapes
@@ -551,7 +568,10 @@
         (into []
               (filter
                (fn [entity]
-                 (or host (not (:object/hidden entity)))))
+                 (let [trigger-shape? (boolean (:trigger-area/region-key entity))]
+                   (and (or host (not (:object/hidden entity)))
+                        (or (not trigger-shape?) show-triggers?)
+                        (or (not trigger-shape?) (:trigger-area/enabled? entity true))))))
               (concat
                (sort compare-objects props)
                (sort compare-objects shapes)

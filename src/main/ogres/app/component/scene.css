@@ -60,6 +60,7 @@
   text-anchor: middle;
 }
 
+
 /* Scene Lighting */
 .scene[data-user="host"] {
   .scene-mask {

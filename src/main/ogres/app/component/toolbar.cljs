@@ -16,6 +16,7 @@
    "draw-line"    {:label "Draw a line." :args [:camera/change-mode :line]}
    "draw-poly"    {:label "Draw a polygon." :args [:camera/change-mode :poly]}
    "draw-rect"    {:label "Draw a rectangle." :args [:camera/change-mode :rect]}
+   "area-trigger" {:label "Create a square area trigger and label it." :args [:camera/change-mode :area-trigger]}
    "mask-create"  {:label "Create a new mask." :args [:camera/change-mode :mask]}
    "mask-hide"    {:label "Mask the entire scene." :args [:scene/mask]}
    "mask-remove"  {:label "Remove a mask." :args [:camera/change-mode :mask-remove]}
@@ -25,6 +26,7 @@
    "scene-grid"   {:label "Grid alignment tool." :args [:camera/change-mode :grid]}
    "scene-ruler"  {:label "Measure distance." :args [:camera/change-mode :ruler]}
    "scene-select" {:label "Hold shift to select multiple tokens." :args [:camera/change-mode :select]}
+   "view-triggers" {:label "Toggle trigger areas on and off." :args [:camera/toggle-view-triggers]}
    "zoom-in"      {:label "Zoom in." :args [:camera/zoom-in]}
    "zoom-out"     {:label "Zoom out." :args [:camera/zoom-out]}
    "zoom-reset"   {:label "Reset to 100% zoom." :args [:camera/zoom-reset]}
@@ -45,6 +47,7 @@
    {:user/camera
     [:camera/selected
      [:camera/draw-mode :default :select]
+     [:camera/show-triggers :default true]
      [:camera/scale :default 1]]}])
 
 (defui toolbar []
@@ -54,6 +57,7 @@
         {host      :user/host
          {scale    :camera/scale
           mode     :camera/draw-mode
+          show-triggers :camera/show-triggers
           selected :camera/selected} :user/camera} result
         on-focus (uix/use-callback
                   (fn [event]
@@ -96,6 +100,8 @@
           ($ icon {:name "circle"}))
         ($ action {:name "draw-rect" :aria-pressed (= mode :rect)}
           ($ icon {:name "square"}))
+        ($ action {:name "area-trigger" :aria-pressed (= mode :area-trigger)}
+          ($ icon {:name "square"}))
         ($ action {:name "draw-cone" :aria-pressed (= mode :cone)}
           ($ icon {:name "triangle"}))
         ($ action {:name "draw-poly" :aria-pressed (= mode :poly)}
@@ -118,5 +124,7 @@
           ($ icon {:name "eye-fill"}))
         ($ action {:name "mask-hide"}
           ($ icon {:name "eye-slash-fill"}))
+        ($ action {:name "view-triggers" :aria-pressed show-triggers}
+          ($ icon {:name (if show-triggers "eye-fill" "eye-slash-fill")}))
         ($ action {:name "scene-grid" :aria-pressed (= mode :grid)}
           ($ icon {:name "compass"}))))))

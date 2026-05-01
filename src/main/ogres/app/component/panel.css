@@ -272,3 +272,12 @@
   padding: 5%;
   text-align: center;
 }
+
+/* Narration/chat readability: allow selecting and highlighting text. */
+.form[data-form="narration"] .form-body,
+.narration,
+.narration-list,
+.narration-entry-text {
+  user-select: text;
+  -webkit-user-select: text;
+}

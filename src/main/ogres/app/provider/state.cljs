@@ -1,5 +1,6 @@
 (ns ogres.app.provider.state
-  (:require [cognitect.transit :as t]
+  (:require [clojure.set :as set]
+            [cognitect.transit :as t]
             [datascript.core :as ds]
             [goog.functions :refer [throttle]]
             [ogres.app.const :refer [VERSION]]
@@ -31,6 +32,7 @@
    :scene/map-file-name {}
    :scene/initiative  {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
    :scene/masks       {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
+   :scene/trigger-areas {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :scene/shapes      {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :scene/tokens      {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :scene/notes       {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
@@ -66,8 +68,58 @@
 
 (def context (uix/create-context))
 
+(def ^:private trigger-sync-select
+  [{:root/scenes
+    [:db/id
+     :scene/map-external-id
+     :scene/map-file-name
+     {:scene/shapes
+      [:db/id
+       :object/type
+       :object/point
+       [:shape/points :default [vec/zero]]
+       :trigger-area/region-key
+       [:trigger-area/label :default ""]
+       [:trigger-area/enabled? :default false]]}]}])
+
+(defn ^:private trigger-sync-attrs [report]
+  (into #{} (map :a) (:tx-data report)))
+
+(def ^:private trigger-watch-attrs
+  #{:trigger-area/region-key
+    :trigger-area/label
+    :trigger-area/enabled?
+    :shape/points
+    :object/point
+    :scene/shapes})
+
+(defn ^:private trigger-shape->body [scene shape]
+  (let [point (:object/point shape)
+        [delta] (:shape/points shape)
+        x1 (.-x point)
+        y1 (.-y point)
+        x2 (+ x1 (.-x delta))
+        y2 (+ y1 (.-y delta))
+        key (:trigger-area/region-key shape)
+        label (or (:trigger-area/label shape) key)
+        scene-ext (or (:scene/map-external-id scene)
+                      (when-let [name (:scene/map-file-name scene)] (str "map-" name))
+                      (str "scene-" (:db/id scene)))]
+    {:scene_external_id scene-ext
+     :region_key key
+     :region_name label
+     :geometry_json {:type "bbox"
+                     :x1 (min x1 x2)
+                     :y1 (min y1 y2)
+                     :x2 (max x1 x2)
+                     :y2 (max y1 y2)}
+     :tags_json {:source "toolbox"
+                 :tool "area-trigger"
+                 :enabled (:trigger-area/enabled? shape true)}}))
+
 (defui ^:private listeners []
-  (let [write (idb/use-writer "images")]
+  (let [write (idb/use-writer "images")
+        conn (uix/use-context context)]
     ;; Removes the given scene image and its thumbnail from the
     ;; IndexedDB images object store.
     (events/use-subscribe :scene-images/remove
@@ -84,7 +136,35 @@
     ;; object store.
     (events/use-subscribe :token-images/remove-all
       (uix/use-callback
-       (fn [hashes] (write :delete hashes)) [write]))))
+       (fn [hashes] (write :delete hashes)) [write]))
+
+    ;; Syncs trigger area rectangle entities to sidecar SQLite map_regions.
+    (events/use-subscribe :tx/commit
+      (uix/use-callback
+       (fn [report]
+         (let [attrs (trigger-sync-attrs report)]
+           (when (seq (set/intersection attrs trigger-watch-attrs))
+             (let [raw  (.getItem js/localStorage "ai-dm-config")
+                   conf (if raw
+                          (try (js/JSON.parse raw) (catch :default _ #js {}))
+                          #js {})
+                   base (or (aget conf "lg-endpoint") "http://localhost:8765")
+                   url  (str base "/dm-admin/api/regions/upsert")
+                   root (ds/pull @conn trigger-sync-select [:db/ident :root])]
+               (doseq [scene (:root/scenes root)
+                       shape (:scene/shapes scene)
+                       :when (and (= :shape/rect (:object/type shape))
+                                  (:trigger-area/region-key shape)
+                                  (:trigger-area/enabled? shape true))]
+                 (let [body (clj->js (trigger-shape->body scene shape))]
+                   (-> (js/fetch url
+                         #js {:method  "POST"
+                              :headers #js {"Content-Type" "application/json"}
+                              :body    (js/JSON.stringify body)})
+                       (.catch
+                        (fn [err]
+                          (js/console.warn "Failed to sync trigger area to sidecar:" err))))))))))
+       [conn]))))
 
 (def ^:private ignored-attrs
   #{:user/host :user/ready :session/status})

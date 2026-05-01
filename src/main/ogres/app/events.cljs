@@ -165,9 +165,18 @@
   event-tx-fn :camera/change-mode
   [data _ mode]
   (let [user (ds/entity data [:db/ident :user])]
-    (if (or (:user/host user) (not (#{:mask :mask-toggle :mask-remove :grid :note} mode)))
+    (if (or (:user/host user) (not (#{:mask :mask-toggle :mask-remove :grid :note :area-trigger} mode)))
       [{:db/id (:db/id (:user/camera user)) :camera/draw-mode mode}]
       [])))
+
+(defmethod
+  ^{:doc "Toggles whether trigger areas are displayed on the current scene."}
+  event-tx-fn :camera/toggle-view-triggers
+  [data]
+  (let [user   (ds/entity data [:db/ident :user])
+        camera (:user/camera user)
+        value  (get camera :camera/show-triggers true)]
+    [{:db/id (:db/id camera) :camera/show-triggers (not value)}]))
 
 (defmethod
   ^{:doc "Changes the zoom value for the current camera by the given value
@@ -687,6 +696,27 @@
     :shape/points (into [] (map (fn [vrt] (vec/sub vrt src))) points)}
    [:db.fn/call assoc-camera :camera/draw-mode :select :camera/selected -1]
    [:db.fn/call assoc-scene :scene/shapes -1]])
+
+(defmethod
+  ^{:doc "Creates a labeled area trigger on the current scene.
+          Area trigger is stored as a rectangle shape so it behaves like
+          normal editable draw rectangles."}
+  event-tx-fn :trigger-area/create
+  [_ _ {:keys [label region-key segment]}]
+  (let [src (.-a segment)
+        dst (.-b segment)]
+    [{:db/id -1
+      :object/type :shape/rect
+      :object/point src
+      :shape/points [(vec/sub dst src)]
+      :shape/color "orange"
+      :shape/pattern :crosses
+      :trigger-area/label (or (some-> label trim not-empty) "Area Trigger")
+      :trigger-area/region-key (or (some-> region-key trim not-empty)
+                                   (str "region-" (.now js/Date)))
+      :trigger-area/enabled? true}
+     [:db.fn/call assoc-camera :camera/draw-mode :select :camera/selected -1]
+     [:db.fn/call assoc-scene :scene/shapes -1]]))
 
 (defmethod event-tx-fn :user/change-bounds
   [_ _ bounds]

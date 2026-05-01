@@ -1,5 +1,5 @@
 (ns ogres.app.component.scene-draw
-  (:require [clojure.string :refer [join]]
+  (:require [clojure.string :as str :refer [join]]
             [ogres.app.component :refer [icon]]
             [ogres.app.const :refer [grid-size half-size]]
             [ogres.app.geom :as geom]
@@ -55,6 +55,19 @@
       (Segment. src src)
       (let [dst (-> (vec/div dir len) (vec/mul (util/round len grid-size)) (vec/add src))]
         (Segment. src dst)))))
+
+(defmulti align-square instance)
+(defmethod align-square Vec2 [a] (align-grid a))
+(defmethod align-square Segment [s]
+  (let [src (align-grid (.-a s))
+        dst (align-grid (.-b s))
+        delta (vec/sub dst src)
+        step (max (js/Math.abs (.-x delta)) (js/Math.abs (.-y delta)))
+        sx (if (neg? (.-x delta)) -1 1)
+        sy (if (neg? (.-y delta)) -1 1)
+        dst (Vec2. (+ (.-x src) (* step sx))
+                   (+ (.-y src) (* step sy)))]
+    (Segment. src dst)))
 
 (def ^:private points->poly
   (completing into (fn [xs] (join " " xs))))
@@ -122,7 +135,10 @@
       [[:scene/grid-align :default false]
        [:scene/grid-origin :default vec/zero]
        [:scene/grid-size :default grid-size]
-       [:scene/show-object-outlines :default true]]}]}])
+       [:scene/show-object-outlines :default true]
+       :db/id
+       :scene/map-external-id
+       :scene/map-file-name]}]}])
 
 (defui ^:private draw-segment [props]
   (let [{:keys [children on-release tile-path align-fn]
@@ -263,6 +279,39 @@
                 (let [v (vec/abs (vec/sub a b))]
                   (str (px->ft (.-x v)) "ft. x "
                        (px->ft (.-y v)) "ft."))))))))))
+
+(defn ^:private slugify [value]
+  (-> value
+      (or "")
+      (str/lower-case)
+      (str/replace #"[^a-z0-9]+" "-")
+      (str/replace #"(^-+|-+$)" "")))
+
+(defui ^:private draw-area-trigger []
+  (let [dispatch (hooks/use-dispatch)
+        _result   (hooks/use-query query)]
+    ($ draw-segment
+      {:align-fn align-square
+       :on-release
+       (fn [segment]
+         (let [label (or (some-> (js/prompt "Area trigger label:" "Area Trigger")
+                                 str/trim
+                                 not-empty)
+                         "Area Trigger")
+               region-key (str (or (not-empty (slugify label)) "area-trigger")
+                               "-" (.now js/Date))]
+           (dispatch :trigger-area/create
+                     {:label label
+                      :region-key region-key
+                      :segment segment})))}
+      (fn [_camera canvas]
+        (let [a (.-a canvas) b (.-b canvas)]
+          ($ :<>
+            ($ :path.scene-draw-shape
+              {:d (join " " [\M (.-x a) (.-y a) \H (.-x b) \V (.-y b) \H (.-x a) \Z])})
+            (let [point (seg/extend canvas 32)]
+              ($ text {:x (.-x point) :y (.-y point)}
+                "Square trigger area"))))))))
 
 (defui ^:private draw-line []
   (let [dispatch (hooks/use-dispatch)]
@@ -410,6 +459,7 @@
       :line   ($ draw-line props)
       :mask   ($ draw-mask props)
       :note   ($ draw-note props)
+      :area-trigger ($ draw-area-trigger props)
       :poly   ($ draw-poly props)
       :rect   ($ draw-rect props)
       :ruler  ($ draw-ruler props)

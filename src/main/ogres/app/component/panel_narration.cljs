@@ -1,5 +1,6 @@
 (ns ogres.app.component.panel-narration
   (:require [ogres.app.ai.core :as ai]
+            [ogres.app.ai.narration :as narration]
             [ogres.app.component :refer [icon]]
             [ogres.app.hooks :as hooks]
             [uix.core :as uix :refer [defui $]]))
@@ -33,6 +34,7 @@
   (let [result     (hooks/use-query query [:db/ident :root])
         entries    (:root/narration result)
         sorted     (sort-by :narration/timestamp (or entries []))
+        visible    (filter narration/visible-entry? sorted)
         ai-ctx     (uix/use-context ai/context)
         pending    (and (some? ai-ctx) (:pending ai-ctx))
         bottom-ref (uix/use-ref)]
@@ -40,13 +42,13 @@
       (fn []
         (when-let [el (deref bottom-ref)]
           (.scrollIntoView el #js {:behavior "smooth" :block "end"})))
-      [(count sorted) pending])
+      [(count visible) pending])
     ($ :.narration
       ($ :header
         ($ :h2 "DM Narration"))
-      (if (or (seq sorted) pending)
+      (if (or (seq visible) pending)
         ($ :ol.narration-list
-          (for [e sorted]
+          (for [e visible]
             ($ entry {:key (:db/id e) :entity e}))
           (when pending
             ($ :li.narration-entry {:data-source "ai" :data-pending true}

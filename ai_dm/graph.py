@@ -6,9 +6,11 @@ Flow:
        ↓
   plan_actions  (calls LLM with tools)
        ↓
-  validate      (no LLM call — pure logic)
+  guard_narration (no LLM call — narration quality/safety checks)
+       ↓
+  validate      (no LLM call — argument/game-state checks)
        ↓ errors?
-    yes → reflect_retry → validate (up to MAX_RETRIES times)
+    yes → reflect_retry → guard_narration → validate (up to MAX_RETRIES times)
     no  → END
 
 The graph returns the final tool_calls list to the FastAPI handler,
@@ -20,6 +22,7 @@ from langgraph.graph import StateGraph, END
 
 from ai_dm.state import DMState
 from ai_dm.nodes.assess import assess
+from ai_dm.nodes.guard_narration import guard_narration
 from ai_dm.nodes.plan import plan
 from ai_dm.nodes.validate import validate
 from ai_dm.nodes.reflect import reflect
@@ -57,13 +60,15 @@ def build_graph(llm_call):
     g = StateGraph(DMState)
     g.add_node("assess_situation", bound_assess)
     g.add_node("plan_actions",     bound_plan)
+    g.add_node("guard_narration",  guard_narration)
     g.add_node("validate",         validate)
     g.add_node("reflect_retry",    bound_reflect)
 
     g.set_entry_point("assess_situation")
     g.add_edge("assess_situation", "plan_actions")
-    g.add_edge("plan_actions",     "validate")
+    g.add_edge("plan_actions",     "guard_narration")
+    g.add_edge("guard_narration",  "validate")
     g.add_conditional_edges("validate", _should_retry)
-    g.add_edge("reflect_retry",    "validate")
+    g.add_edge("reflect_retry",    "guard_narration")
 
     return g.compile()
