@@ -117,9 +117,35 @@
                  :tool "area-trigger"
                  :enabled (:trigger-area/enabled? shape true)}}))
 
+(defn ^:private sidecar-regions-url []
+  (let [raw  (.getItem js/localStorage "ai-dm-config")
+        conf (if raw
+               (try (js/JSON.parse raw) (catch :default _ #js {}))
+               #js {})
+        base (or (aget conf "lg-endpoint") "http://localhost:8765")]
+    (str base "/dm-admin/api/regions/upsert")))
+
+(defn ^:private sync-trigger-shapes! [conn]
+  (let [url  (sidecar-regions-url)
+        root (ds/pull @conn trigger-sync-select [:db/ident :root])]
+    (doseq [scene (:root/scenes root)
+            shape (:scene/shapes scene)
+            :when (and (= :shape/rect (:object/type shape))
+                       (:trigger-area/region-key shape)
+                       (:trigger-area/enabled? shape true))]
+      (let [body (clj->js (trigger-shape->body scene shape))]
+        (-> (js/fetch url
+              #js {:method  "POST"
+                   :headers #js {"Content-Type" "application/json"}
+                   :body    (js/JSON.stringify body)})
+            (.catch
+             (fn [err]
+               (js/console.warn "Failed to sync trigger area to sidecar:" err))))))))
+
 (defui ^:private listeners []
   (let [write (idb/use-writer "images")
-        conn (uix/use-context context)]
+        conn (uix/use-context context)
+        bootstrap-sync? (uix/use-ref false)]
     ;; Removes the given scene image and its thumbnail from the
     ;; IndexedDB images object store.
     (events/use-subscribe :scene-images/remove
@@ -144,27 +170,23 @@
        (fn [report]
          (let [attrs (trigger-sync-attrs report)]
            (when (seq (set/intersection attrs trigger-watch-attrs))
-             (let [raw  (.getItem js/localStorage "ai-dm-config")
-                   conf (if raw
-                          (try (js/JSON.parse raw) (catch :default _ #js {}))
-                          #js {})
-                   base (or (aget conf "lg-endpoint") "http://localhost:8765")
-                   url  (str base "/dm-admin/api/regions/upsert")
-                   root (ds/pull @conn trigger-sync-select [:db/ident :root])]
-               (doseq [scene (:root/scenes root)
-                       shape (:scene/shapes scene)
-                       :when (and (= :shape/rect (:object/type shape))
-                                  (:trigger-area/region-key shape)
-                                  (:trigger-area/enabled? shape true))]
-                 (let [body (clj->js (trigger-shape->body scene shape))]
-                   (-> (js/fetch url
-                         #js {:method  "POST"
-                              :headers #js {"Content-Type" "application/json"}
-                              :body    (js/JSON.stringify body)})
-                       (.catch
-                        (fn [err]
-                          (js/console.warn "Failed to sync trigger area to sidecar:" err))))))))))
-       [conn]))))
+             (sync-trigger-shapes! conn))))
+       [conn]))
+
+    ;; One-time bootstrap sync after app state is loaded/restored.
+    (uix/use-effect
+     (fn []
+       (let [key (keyword (str "trigger-bootstrap-sync-" (random-uuid)))
+             try-sync
+             (fn []
+               (when (and (not (.-current bootstrap-sync?))
+                          (:user/ready (ds/entity @conn [:db/ident :user])))
+                 (set! (.-current bootstrap-sync?) true)
+                 (sync-trigger-shapes! conn)))]
+         (try-sync)
+         (ds/listen! conn key (fn [_] (try-sync)))
+         (fn [] (ds/unlisten! conn key))))
+     [conn])))
 
 (def ^:private ignored-attrs
   #{:user/host :user/ready :session/status})
