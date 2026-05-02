@@ -102,6 +102,102 @@ def json_dumps(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _safe_json_loads(value: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _format_xai_error_payload(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "unknown xAI error"
+    if isinstance(payload.get("error"), dict):
+        err = payload["error"]
+        msg = err.get("message") or err.get("type") or "xAI error"
+        code = err.get("code")
+        return f"{msg} (code={code})" if code else str(msg)
+    if isinstance(payload.get("error"), str):
+        return payload["error"]
+    if "message" in payload:
+        return str(payload["message"])
+    return json.dumps(payload, ensure_ascii=False)[:400]
+
+
+def _extract_message_json_dict(chat_response: dict[str, Any]) -> dict[str, Any]:
+    choices = chat_response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("xAI response has no choices")
+    msg = choices[0].get("message")
+    if not isinstance(msg, dict):
+        raise RuntimeError("xAI response has no message object")
+    content = msg.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("xAI response message content is empty")
+    content = re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE | re.MULTILINE)
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("xAI response content is not a JSON object")
+    return parsed
+
+
+def build_visual_context(marker_dir: Path, toc_limit: int = 120, image_limit: int = 200) -> str:
+    image_files = sorted(
+        [
+            p.name
+            for p in marker_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        ]
+    )[:image_limit]
+    toc_titles: list[str] = []
+    for meta_path in sorted(marker_dir.rglob("*_meta.json")):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8", errors="ignore"))
+        except json.JSONDecodeError:
+            continue
+        toc = data.get("table_of_contents")
+        if not isinstance(toc, list):
+            continue
+        for entry in toc:
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title") or "").replace("\n", " ").strip()
+            page = entry.get("page_id")
+            if title:
+                toc_titles.append(f"p{page}: {title}" if page is not None else title)
+            if len(toc_titles) >= toc_limit:
+                break
+        if len(toc_titles) >= toc_limit:
+            break
+
+    lines = ["VISUAL ASSET CONTEXT"]
+    lines.append("Images (filenames):")
+    if image_files:
+        lines.extend(f"- {name}" for name in image_files)
+    else:
+        lines.append("- (none)")
+    lines.append("TOC headings from marker metadata:")
+    if toc_titles:
+        lines.extend(f"- {title}" for title in toc_titles)
+    else:
+        lines.append("- (none)")
+    return "\n".join(lines)
+
+
+def build_llm_input(doc_text: str, visual_context: str, text_limit: int = 36000) -> str:
+    text = doc_text[:text_limit]
+    return (
+        "You are ingesting a DnD adventure into a structured campaign database.\n"
+        "Place data by semantic meaning (NPCs, scenes, regions, hooks).\n"
+        "Use visual/map clues from filenames and TOC headings when deciding scenes/regions.\n\n"
+        f"{visual_context}\n\n"
+        "ADVENTURE TEXT START\n"
+        f"{text}\n"
+        "ADVENTURE TEXT END\n"
+    )
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -226,13 +322,23 @@ def call_xai_chat(api_key: str, payload: dict[str, Any], retries: int = 2) -> di
         try:
             with urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
-            content = re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE | re.MULTILINE)
-            parsed = json.loads(content)
-            if not isinstance(parsed, dict):
-                raise ValueError("Grok response is not a JSON object")
-            return parsed
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            if "choices" not in data:
+                raise RuntimeError(f"xAI response missing choices: {_format_xai_error_payload(data)}")
+            return data
+        except HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            payload_err = _safe_json_loads(body)
+            detail = _format_xai_error_payload(payload_err) if payload_err else body[:400]
+            last_err = RuntimeError(f"HTTP {exc.code} from xAI: {detail}")
+            # 4xx are typically non-retriable request issues.
+            if 400 <= int(exc.code) < 500:
+                break
+            time.sleep(1.5)
+        except (URLError, TimeoutError, json.JSONDecodeError, KeyError, ValueError, RuntimeError) as exc:
             last_err = exc
             time.sleep(1.5)
     raise RuntimeError(f"Grok call failed: {last_err}")
@@ -411,6 +517,50 @@ def upsert_npc(conn: sqlite3.Connection, npc: dict[str, Any]) -> None:
         """,
         (external_id, name, notes),
     )
+    row = conn.execute("SELECT id FROM camp_characters WHERE external_id=?", (external_id,)).fetchone()
+    cid = int(row[0])
+    conn.execute(
+        """
+        INSERT INTO npc_profiles (npc_character_id, class_archetype, role, motivation_text, secrets_text, languages_json, features_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(npc_character_id) DO UPDATE SET
+          class_archetype=excluded.class_archetype,
+          role=excluded.role,
+          motivation_text=excluded.motivation_text,
+          secrets_text=excluded.secrets_text,
+          languages_json=excluded.languages_json,
+          features_json=excluded.features_json
+        """,
+        (
+            cid,
+            npc.get("class_archetype"),
+            npc.get("role"),
+            npc.get("motivation"),
+            json_dumps(npc.get("secrets", [])),
+            json_dumps(npc.get("languages", [])),
+            json_dumps(npc.get("features", [])),
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO npc_personality (npc_character_id, personality_traits_json, ideals_json, bonds_json, flaws_json, mannerisms_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(npc_character_id) DO UPDATE SET
+          personality_traits_json=excluded.personality_traits_json,
+          ideals_json=excluded.ideals_json,
+          bonds_json=excluded.bonds_json,
+          flaws_json=excluded.flaws_json,
+          mannerisms_json=excluded.mannerisms_json
+        """,
+        (
+            cid,
+            json_dumps(npc.get("traits", [])),
+            json_dumps(npc.get("ideals", [])),
+            json_dumps(npc.get("bonds", [])),
+            json_dumps(npc.get("flaws", [])),
+            json_dumps(npc.get("mannerisms", [])),
+        ),
+    )
 
 
 def run_tool_call_provisioning(
@@ -424,6 +574,7 @@ def run_tool_call_provisioning(
     system_prompt = (
         "You are a data provisioning agent for D&D campaign ingestion. "
         "Use tool calls to insert/update entities from the provided adventure text. "
+        "Reason about where each piece belongs in the DB schema before calling a tool. "
         "Prefer high-confidence entities only. "
         "After tool calls, return a compact JSON object with keys: summary, hooks. "
         "hooks should be an array of {title, summary, trigger}."
@@ -512,50 +663,6 @@ def run_tool_call_provisioning(
             )
 
     return {"counts": counters, "hooks": hooks}
-    row = conn.execute("SELECT id FROM camp_characters WHERE external_id=?", (external_id,)).fetchone()
-    cid = int(row[0])
-    conn.execute(
-        """
-        INSERT INTO npc_profiles (npc_character_id, class_archetype, role, motivation_text, secrets_text, languages_json, features_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(npc_character_id) DO UPDATE SET
-          class_archetype=excluded.class_archetype,
-          role=excluded.role,
-          motivation_text=excluded.motivation_text,
-          secrets_text=excluded.secrets_text,
-          languages_json=excluded.languages_json,
-          features_json=excluded.features_json
-        """,
-        (
-            cid,
-            npc.get("class_archetype"),
-            npc.get("role"),
-            npc.get("motivation"),
-            json_dumps(npc.get("secrets", [])),
-            json_dumps(npc.get("languages", [])),
-            json_dumps(npc.get("features", [])),
-        ),
-    )
-    conn.execute(
-        """
-        INSERT INTO npc_personality (npc_character_id, personality_traits_json, ideals_json, bonds_json, flaws_json, mannerisms_json)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(npc_character_id) DO UPDATE SET
-          personality_traits_json=excluded.personality_traits_json,
-          ideals_json=excluded.ideals_json,
-          bonds_json=excluded.bonds_json,
-          flaws_json=excluded.flaws_json,
-          mannerisms_json=excluded.mannerisms_json
-        """,
-        (
-            cid,
-            json_dumps(npc.get("traits", [])),
-            json_dumps(npc.get("ideals", [])),
-            json_dumps(npc.get("bonds", [])),
-            json_dumps(npc.get("flaws", [])),
-            json_dumps(npc.get("mannerisms", [])),
-        ),
-    )
 
 
 def main() -> int:
@@ -569,6 +676,7 @@ def main() -> int:
     ap.add_argument("--chunk-overlap", type=int, default=150, help="Chunk overlap for RAG inserts.")
     ap.add_argument("--max-files", type=int, default=0, help="Limit input file count (0 = all).")
     ap.add_argument("--model", default=None, help="Grok model override.")
+    ap.add_argument("--fallback-model", default=None, help="Fallback model if primary model request fails.")
     ap.add_argument("--dotenv", default=None, help="Path to env file (default .env.local).")
     ap.add_argument("--skip-grok", action="store_true", help="Ingest text only; skip Grok extraction.")
     ap.add_argument("--dry-run", action="store_true", help="No DB writes.")
@@ -582,9 +690,19 @@ def main() -> int:
 
     env = load_env(Path(args.dotenv) if args.dotenv else None)
     api_key = env.get("XAI_API_KEY") or env.get("GROK_API_KEY") or env.get("AI_DM_GROK_API_KEY")
-    model = args.model or env.get("AI_DM_GROK_MODEL") or env.get("GROK_MODEL") or env.get("XAI_MODEL") or "grok-3-mini"
+    # Prefer a cost-efficient reasoning model for importer cognition, then fallback.
+    model = (
+        args.model
+        or env.get("AI_DM_GROK_IMPORT_MODEL")
+        or env.get("AI_DM_GROK_MODEL")
+        or env.get("GROK_MODEL")
+        or env.get("XAI_MODEL")
+        or "grok-4-fast-reasoning"
+    )
+    fallback_model = args.fallback_model or env.get("AI_DM_GROK_IMPORT_FALLBACK_MODEL") or "grok-3-mini"
     db_path = args.db_path or env.get("AI_DM_DB_PATH") or str(Path("ai_dm") / "data" / "dm.sqlite")
     source_title = args.source_title or marker_dir.name
+    visual_context = build_visual_context(marker_dir)
 
     files = sorted(
         [p for p in marker_dir.rglob("*") if p.is_file() and p.suffix.lower() in {".md", ".txt"}]
@@ -635,7 +753,7 @@ def main() -> int:
             continue
 
         # Use a bounded payload to control cost and context size.
-        grok_input = text[:40000]
+        grok_input = build_llm_input(text, visual_context)
         if args.legacy_json_mode:
             payload = {
                 "model": model,
@@ -651,9 +769,12 @@ def main() -> int:
                 ],
                 "temperature": 0.1,
             }
-            data = call_xai_chat(api_key, payload)
-            content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE | re.MULTILINE))
+            try:
+                data = call_xai_chat(api_key, payload)
+            except RuntimeError:
+                payload["model"] = fallback_model
+                data = call_xai_chat(api_key, payload)
+            parsed = _extract_message_json_dict(data)
             npcs = parsed.get("npcs", []) if isinstance(parsed.get("npcs", []), list) else []
             scenes = parsed.get("scenes", []) if isinstance(parsed.get("scenes", []), list) else []
             regions = parsed.get("map_regions", []) if isinstance(parsed.get("map_regions", []), list) else []
@@ -675,13 +796,81 @@ def main() -> int:
                     if row is not None:
                         upsert_region(conn, region, int(row[0]))
         else:
-            result = run_tool_call_provisioning(
-                conn=conn,
-                api_key=api_key,
-                model=model,
-                text=grok_input,
-                dry_run=args.dry_run,
-            )
+            try:
+                result = run_tool_call_provisioning(
+                    conn=conn,
+                    api_key=api_key,
+                    model=model,
+                    text=grok_input,
+                    dry_run=args.dry_run,
+                )
+            except RuntimeError as exc:
+                print(
+                    f"warning: tool-call provisioning failed on model={model} ({exc}); trying fallback model={fallback_model}",
+                    file=sys.stderr,
+                )
+                try:
+                    result = run_tool_call_provisioning(
+                        conn=conn,
+                        api_key=api_key,
+                        model=fallback_model,
+                        text=grok_input,
+                        dry_run=args.dry_run,
+                    )
+                except RuntimeError as exc2:
+                    print(
+                        f"warning: fallback tool-calling also failed ({exc2}); falling back to legacy JSON mode",
+                        file=sys.stderr,
+                    )
+                    payload = {
+                        "model": fallback_model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Extract D&D campaign entities from adventure text. "
+                                    "Return strict JSON only with keys: npcs, scenes, map_regions, hooks."
+                                ),
+                            },
+                            {"role": "user", "content": grok_input},
+                        ],
+                        "temperature": 0.1,
+                    }
+                    data = call_xai_chat(api_key, payload)
+                    parsed = _extract_message_json_dict(data)
+                    npcs = parsed.get("npcs", []) if isinstance(parsed.get("npcs", []), list) else []
+                    scenes = parsed.get("scenes", []) if isinstance(parsed.get("scenes", []), list) else []
+                    regions = parsed.get("map_regions", []) if isinstance(parsed.get("map_regions", []), list) else []
+                    hooks = parsed.get("hooks", []) if isinstance(parsed.get("hooks", []), list) else []
+                    counters.npcs += len(npcs)
+                    counters.scenes += len(scenes)
+                    counters.regions += len(regions)
+                    counters.hooks += len(hooks)
+                    if not args.dry_run:
+                        for scene in scenes:
+                            upsert_scene(conn, scene)
+                        for npc in npcs:
+                            upsert_npc(conn, npc)
+                        for region in regions:
+                            ext = region.get("scene_external_id")
+                            if not ext:
+                                continue
+                            row = conn.execute("SELECT id FROM map_scenes WHERE external_scene_id=?", (ext,)).fetchone()
+                            if row is not None:
+                                upsert_region(conn, region, int(row[0]))
+                    extracted_bundle.append(
+                        {
+                            "source_file": str(path),
+                            "npcs": npcs,
+                            "scenes": scenes,
+                            "map_regions": regions,
+                            "hooks": hooks,
+                        }
+                    )
+                    print(
+                        f"[file] {path.name}: sections={len(sections)} npcs={len(npcs)} scenes={len(scenes)} regions={len(regions)} hooks={len(hooks)}"
+                    )
+                    continue
             hooks = result.get("hooks", [])
             counts = result.get("counts", {})
             counters.npcs += int(counts.get("npcs", 0))
