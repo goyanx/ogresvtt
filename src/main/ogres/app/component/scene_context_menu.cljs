@@ -333,18 +333,79 @@
            (fn [event]
              (on-change :objects/update :shape/color (.. event -target -value)))})))))
 
+(defui ^:private shape-form-trigger
+  [{:keys [on-change values]}]
+  (let [region-key (first (values :trigger-area/region-key))
+        label      (first (values :trigger-area/label))
+        context    (first (values :trigger-area/context))
+        enabled?   (first (values :trigger-area/enabled?))]
+    ($ :form.context-menu-form-trigger
+      {:on-submit (fn [event] (.preventDefault event))}
+      ($ :.context-menu-trigger-group
+        ($ :label {:for "trigger-label"} "Trigger Label")
+        ($ :input.text.text-ghost
+          {:id "trigger-label"
+           :type "text"
+           :name "trigger-label"
+           :auto-complete "off"
+           :default-value (or label "")
+           :placeholder "N1"
+           :on-blur
+           (fn [event]
+             (on-change :objects/update :trigger-area/label
+                        (.. event -target -value)))}))
+      ($ :.context-menu-trigger-group
+        ($ :label {:for "trigger-context"} "Region Context")
+        ($ :textarea.text.text-ghost
+          {:id "trigger-context"
+           :name "trigger-context"
+           :rows 6
+           :auto-complete "off"
+           :spell-check false
+           :default-value (or context "")
+           :placeholder "Paste region text here. AI DM will use this when tokens are inside this area."
+           :on-blur
+           (fn [event]
+             (on-change :objects/update :trigger-area/context
+                        (.. event -target -value)))}))
+      ($ :.context-menu-trigger-group
+        ($ :label {:for "trigger-region-key"} "Region Key")
+        ($ :input.text.text-ghost
+          {:id "trigger-region-key"
+           :type "text"
+           :name "trigger-region-key"
+           :read-only true
+           :value (or region-key "")}))
+      ($ :button.context-menu-trigger-toggle
+        {:type "button"
+         :data-enabled (boolean enabled?)
+         :on-click
+         (fn []
+           (on-change :objects/update :trigger-area/enabled?
+                      (not (boolean enabled?))))}
+        (str "Enabled: " (if enabled? "On" "Off"))))))
+
 (defui ^:private context-menu-shape [props]
   (let [dispatch (hooks/use-dispatch)
-        data     (:data props)]
+        data     (:data props)
+        trigger? (every? :trigger-area/region-key data)]
     ($ context-menu-fn
       {:render-toolbar
        (fn [{:keys [selected on-change]}]
-         ($ :button
-           {:type "button"
-            :data-selected (= selected :style)
-            :data-tooltip "Style"
-            :on-click #(on-change :style)}
-           ($ icon {:name "palette-fill"})))
+         ($ :<>
+           ($ :button
+             {:type "button"
+              :data-selected (= selected :style)
+              :data-tooltip "Style"
+              :on-click #(on-change :style)}
+             ($ icon {:name "palette-fill"}))
+           (if trigger?
+             ($ :button
+               {:type "button"
+                :data-selected (= selected :trigger)
+                :data-tooltip "Trigger"
+                :on-click #(on-change :trigger)}
+               ($ icon {:name "geo-alt"})))))
        :render-aside
        (fn []
          ($ :<>
@@ -359,15 +420,18 @@
               (fn []
                 (dispatch :objects/remove-selected))})))}
       (fn [{:keys [selected]}]
-        (if (= selected :style)
-          ($ shape-form-style
-            {:values
-             (fn vs
-               ([f] (vs f #{}))
-               ([f init] (into init (map f) data)))
-             :on-change
-             (fn [event & args]
-               (apply dispatch event (map :db/id data) args))}))))))
+        (let [form-props
+              {:values
+               (fn vs
+                 ([f] (vs f #{}))
+                 ([f init] (into init (map f) data)))
+               :on-change
+               (fn [event & args]
+                 (apply dispatch event (map :db/id data) args))}]
+          (case selected
+            :style   ($ shape-form-style form-props)
+            :trigger (if trigger? ($ shape-form-trigger form-props))
+            nil))))))
 
 (defui context-menu-prop [props]
   (let [dispatch (hooks/use-dispatch)

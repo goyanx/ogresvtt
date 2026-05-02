@@ -712,6 +712,7 @@
       :shape/color "orange"
       :shape/pattern :crosses
       :trigger-area/label (or (some-> label trim not-empty) "Area Trigger")
+      :trigger-area/context ""
       :trigger-area/region-key (or (some-> region-key trim not-empty)
                                    (str "region-" (.now js/Date)))
       :trigger-area/enabled? true}

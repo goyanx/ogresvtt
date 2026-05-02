@@ -501,6 +501,7 @@
            [:shape/color :default "red"]
            [:shape/pattern :default :solid]
            [:trigger-area/label :default ""]
+           [:trigger-area/context :default ""]
            :trigger-area/region-key
            [:trigger-area/enabled? :default false]]}
          {:scene/props

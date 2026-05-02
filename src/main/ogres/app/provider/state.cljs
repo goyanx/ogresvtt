@@ -80,6 +80,7 @@
        [:shape/points :default [vec/zero]]
        :trigger-area/region-key
        [:trigger-area/label :default ""]
+       [:trigger-area/context :default ""]
        [:trigger-area/enabled? :default false]]}]}])
 
 (defn ^:private trigger-sync-attrs [report]
@@ -88,6 +89,7 @@
 (def ^:private trigger-watch-attrs
   #{:trigger-area/region-key
     :trigger-area/label
+    :trigger-area/context
     :trigger-area/enabled?
     :shape/points
     :object/point
@@ -102,6 +104,7 @@
         y2 (+ y1 (.-y delta))
         key (:trigger-area/region-key shape)
         label (or (:trigger-area/label shape) key)
+        context (:trigger-area/context shape)
         scene-ext (or (:scene/map-external-id scene)
                       (when-let [name (:scene/map-file-name scene)] (str "map-" name))
                       (str "scene-" (:db/id scene)))]
@@ -115,7 +118,8 @@
                      :y2 (max y1 y2)}
      :tags_json {:source "toolbox"
                  :tool "area-trigger"
-                 :enabled (:trigger-area/enabled? shape true)}}))
+                 :enabled (:trigger-area/enabled? shape true)
+                 :context_text (or context "")}}))
 
 (defn ^:private sidecar-regions-url []
   (let [raw  (.getItem js/localStorage "ai-dm-config")

@@ -12,6 +12,29 @@
      :narration/timestamp
      :narration/source]}])
 
+(def ^:private thinking-labels
+  ["Reading scene state"
+   "Checking token positions"
+   "Evaluating region context"
+   "Querying rules memory"
+   "Planning next actions"
+   "Composing narrative response"])
+
+(defn ^:private use-thinking-status
+  [pending]
+  (let [[elapsed set-elapsed] (uix/use-state 0)]
+    (uix/use-effect
+      (fn []
+        (if pending
+          (let [id (js/setInterval #(set-elapsed inc) 1000)]
+            (fn [] (js/clearInterval id)))
+          (set-elapsed 0)))
+      [pending])
+    (let [idx (mod (quot elapsed 4) (count thinking-labels))
+          label (nth thinking-labels idx)]
+      {:elapsed elapsed
+       :label label})))
+
 (defui ^:private entry [{:keys [entity]}]
   (let [{:keys [narration/text narration/source narration/timestamp]} entity
         time-str (when timestamp
@@ -37,6 +60,7 @@
         visible    (filter narration/visible-entry? sorted)
         ai-ctx     (uix/use-context ai/context)
         pending    (and (some? ai-ctx) (:pending ai-ctx))
+        {thinking-label :label thinking-elapsed :elapsed} (use-thinking-status pending)
         bottom-ref (uix/use-ref)]
     (uix/use-effect
       (fn []
@@ -55,7 +79,8 @@
               ($ :.narration-entry-header
                 ($ :span.narration-entry-source "AI DM")
                 ($ :span.narration-entry-time "…"))
-              ($ :p.narration-entry-text "Thinking…")))
+              ($ :p.narration-entry-text
+                (str thinking-label " (" thinking-elapsed "s)…"))))
           ($ :li {:ref bottom-ref :style {:height 0 :padding 0 :margin 0 :list-style "none"}}))
         ($ :.narration-empty
           ($ icon {:name "dnd" :size 48})

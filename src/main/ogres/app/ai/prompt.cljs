@@ -1,5 +1,6 @@
 (ns ogres.app.ai.prompt
   (:require [datascript.core :as ds]
+            [clojure.string :as str]
             [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size]]))
 
@@ -68,6 +69,58 @@
        (or (:token/label b) (str "#" (:db/id b)))
        " (id " (:db/id b) ")\n"))
 
+(defn- point-in-trigger-rect?
+  [point shape]
+  (let [origin (:object/point shape)
+        [delta] (:shape/points shape)
+        x (.-x point)
+        y (.-y point)
+        x1 (.-x origin)
+        y1 (.-y origin)
+        x2 (+ x1 (.-x delta))
+        y2 (+ y1 (.-y delta))]
+    (and (<= (min x1 x2) x (max x1 x2))
+         (<= (min y1 y2) y (max y1 y2)))))
+
+(defn- area-context
+  [shape]
+  (let [raw (:trigger-area/context shape)
+        txt (some-> raw str str/trim not-empty)]
+    (when txt txt)))
+
+(defn- format-token-region-context
+  [token shape]
+  (let [token-label (or (:token/label token) "Unknown")
+        region-label (or (:trigger-area/label shape)
+                         (:trigger-area/region-key shape)
+                         "Unnamed region")
+        context (area-context shape)
+        indented (when context (str/replace context #"\r?\n" "\n      "))]
+    (str "  - token \"" token-label "\" (id " (:db/id token) ") in region \"" region-label "\"\n"
+         (when (seq indented)
+           (str "      " indented "\n")))))
+
+(defn- token-region-context-lines
+  [scene tokens]
+  (let [regions (->> (:scene/shapes scene)
+                     (filter
+                       (fn [shape]
+                         (and (= :shape/rect (:object/type shape))
+                              (:trigger-area/region-key shape)
+                              (:trigger-area/enabled? shape true)))))
+        matches
+        (for [token tokens
+              :let [point (:object/point token)]
+              :when point
+              region regions
+              :when (and (seq (area-context region))
+                         (point-in-trigger-rect? point region))]
+          (format-token-region-context token region))]
+    (if (seq matches)
+      (str "\nAREA REGION CONTEXT (use this when narrating actions inside these zones):\n"
+           (apply str matches))
+      "")))
+
 (defn serialize-game-state
   "Serializes the current scene's game state from the DataScript database
    into a text block suitable for an LLM system prompt."
@@ -85,6 +138,7 @@
             npcs       (remove player-token? all-tokens)
             initiative (ds/pull-many db token-pull (map :db/id (:scene/initiative scene)))
             rounds     (:initiative/rounds scene)
+            region-context (token-region-context-lines scene all-tokens)
             blocked    (when (seq walls) (blocked-pairs all-tokens walls doors))]
         (str
          "SCENE: " (or (:scene/label scene) "Unnamed") "\n"
@@ -104,6 +158,7 @@
          (when (seq blocked)
            (str "\nBLOCKED LINE OF SIGHT (these pairs cannot see each other):\n"
                 (apply str (map format-blocked-pair blocked))))
+         region-context
          (when (seq initiative)
            (str
             "\nINITIATIVE TRACKER:\n"
