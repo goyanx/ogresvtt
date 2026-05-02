@@ -274,3 +274,44 @@ See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin detail
 
 
 LangGraph DM can now emit `show_map` action tool calls to request scene/map switching in the client, backed by `map_scenes` config in SQLite.
+
+### 11) Import `marker-pdf` campaign output with Grok tool-calling
+
+Use the standalone CLI importer to ingest `marker_single` output into SQLite RAG
+and campaign tables. This script is independent from sidecar runtime code
+(it does not import or modify `ai_dm` modules).
+
+Script path:
+- `scripts/marker_import_grok.py`
+
+Input:
+- folder produced by `marker_single` (reads `.md` / `.txt`)
+
+Output:
+- RAG rows in `comp_*` tables
+- NPC + map provisioning in `camp_*`, `npc_*`, `map_*` tables via Grok function/tool calls
+- extraction artifact file: `<marker-dir>/ogres_import_extracted.json`
+
+Required env for Grok:
+- `XAI_API_KEY` (or `GROK_API_KEY` / `AI_DM_GROK_API_KEY`)
+- Optional model override: `AI_DM_GROK_MODEL` (or `GROK_MODEL` / `XAI_MODEL`)
+- Optional DB override: `AI_DM_DB_PATH`
+
+Example:
+
+```powershell
+python scripts/marker_import_grok.py `
+  --marker-dir "C:\Users\goyan\Documents\Code\ogresvtt-testcampaigns\vecna_nest_of_eldritch_eye" `
+  --source-title "Vecna: Nest of the Eldritch Eye" `
+  --edition "5.5e"
+```
+
+Useful flags:
+- `--dry-run` (no DB writes)
+- `--skip-grok` (RAG ingest only)
+- `--dotenv <path>` (use non-default env file)
+- `--max-files N` (cap number of processed files)
+- `--legacy-json-mode` (fallback: non-tool-call extraction path)
+
+See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for DB domains and tooling context.
+Quickstart: [docs/MARKER_IMPORTER_QUICKSTART.md](docs/MARKER_IMPORTER_QUICKSTART.md)

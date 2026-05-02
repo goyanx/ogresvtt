@@ -83,6 +83,49 @@ python -m ai_dm.ingest_compendium \
 
 You can pass `--file` multiple times.
 
+## Marker-PDF Importer (Standalone CLI)
+
+For adventure/module extraction pipelines (for example `marker_single`), use:
+
+- `scripts/marker_import_grok.py`
+
+This importer:
+- ingests extracted `.md` / `.txt` into `comp_*` RAG tables
+- uses Grok chat-completions function/tool-calling to provision:
+  - `camp_characters`
+  - `npc_profiles`
+  - `npc_personality`
+  - `map_scenes`
+  - `map_regions`
+- writes `<marker-dir>/ogres_import_extracted.json` as an audit artifact
+
+It is intentionally decoupled from sidecar runtime modules (`ai_dm/*`).
+
+### Required Env
+
+- `XAI_API_KEY` (or `GROK_API_KEY` / `AI_DM_GROK_API_KEY`)
+- Optional model: `AI_DM_GROK_MODEL` (or `GROK_MODEL` / `XAI_MODEL`)
+- Optional DB path: `AI_DM_DB_PATH`
+
+### Example Command
+
+```powershell
+python scripts/marker_import_grok.py `
+  --marker-dir "C:\path\to\marker_output" `
+  --source-title "Vecna: Nest of the Eldritch Eye" `
+  --edition "5.5e"
+```
+
+### CLI Notes
+
+- `--dry-run`: parse and call model, but rollback DB writes.
+- `--skip-grok`: ingest text chunks only; no NPC/map provisioning.
+- `--legacy-json-mode`: fallback to single JSON extraction mode (no function-call loop).
+- `--dotenv <path>`: load env values from custom file instead of `.env.local`.
+
+Quickstart:
+- [MARKER_IMPORTER_QUICKSTART.md](MARKER_IMPORTER_QUICKSTART.md)
+
 ## Agentic Tools (Sidecar Query Tools)
 
 The planning loop can call these internal tools:
