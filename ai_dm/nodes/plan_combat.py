@@ -45,6 +45,7 @@ Rules:
 - Use deterministic tool calls; do not do hidden arithmetic in prose.
 - Call narrate once with concise in-world narration.
 - If any PC/NPC roll occurs this turn, narrate the actual rolled number(s).
+- If resolve_damage returns positive damage, you must apply it to a target via apply_damage (preferred) or update_hp before advance_turn.
 - Narration is player-facing: never reveal hidden map/region metadata, trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map keys like N3/N6.
 - Never include internal IDs/keys/labels from game-state internals in narration.
 - All output must be English only.
@@ -103,6 +104,7 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
     action_calls = []
     content = ""
     roll_markers: list[set[str]] = []
+    requires_hp_application = False
 
     for _ in range(MAX_QUERY_ROUNDS):
         response = await llm_call(messages, tools=TOOL_DEFINITIONS)
@@ -122,6 +124,16 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
                     "combat narrate: include visible roll result number(s) for this turn "
                     f"(missing: {', '.join(missing)})"
                 )
+            if requires_hp_application:
+                has_hp_apply = any(
+                    tc.get("function", {}).get("name") in {"apply_damage", "update_hp"}
+                    for tc in action_calls
+                )
+                if not has_hp_apply:
+                    errors.append(
+                        "combat: resolve_damage produced positive damage but no HP update tool was called; "
+                        "add apply_damage (preferred) or update_hp before advance_turn"
+                    )
             return {
                 **state,
                 "tool_calls": action_calls,
@@ -142,6 +154,14 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
                 markers = _roll_markers_from_result(result)
                 if markers:
                     roll_markers.append(markers)
+            if fn_name == "resolve_damage":
+                try:
+                    damage_result = json.loads(result)
+                except json.JSONDecodeError:
+                    damage_result = {}
+                final_damage = damage_result.get("final_damage")
+                if isinstance(final_damage, int) and final_damage > 0:
+                    requires_hp_application = True
             messages.append(
                 {
                     "role": "tool",
@@ -158,6 +178,16 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
             "combat narrate: include visible roll result number(s) for this turn "
             f"(missing: {', '.join(missing)})"
         )
+    if requires_hp_application:
+        has_hp_apply = any(
+            tc.get("function", {}).get("name") in {"apply_damage", "update_hp"}
+            for tc in action_calls
+        )
+        if not has_hp_apply:
+            errors.append(
+                "combat: resolve_damage produced positive damage but no HP update tool was called; "
+                "add apply_damage (preferred) or update_hp before advance_turn"
+            )
     return {
         **state,
         "tool_calls": action_calls,

@@ -36,8 +36,6 @@ def enforce_combat_turn_phase(state: DMState) -> DMState:
     has_narrate = "narrate" in idx
     has_advance = "advance_turn" in idx
     has_hp_change = "update_hp" in idx or "apply_damage" in idx
-    has_attack_math = "resolve_attack_vs_ac" in idx or "resolve_damage" in idx
-    has_roll = "roll_dice" in idx
 
     if not has_narrate:
         errors.append("combat: missing narrate tool call")
@@ -45,21 +43,8 @@ def enforce_combat_turn_phase(state: DMState) -> DMState:
         errors.append("combat: missing advance_turn; end each resolved combatant turn by advancing initiative")
     if names.count("advance_turn") > 1:
         errors.append("combat: advance_turn must be called exactly once per resolved turn")
-    if has_hp_change and not has_attack_math:
-        errors.append("combat: HP change used without attack/damage resolution")
-    if "resolve_attack_vs_ac" in idx and not has_roll:
-        errors.append("combat: resolve_attack_vs_ac should be preceded by roll_dice")
 
-    # Ordering constraints (when present together)
-    if "resolve_attack_vs_ac" in idx and "resolve_damage" in idx:
-        if idx["resolve_damage"] < idx["resolve_attack_vs_ac"]:
-            errors.append("combat: resolve_damage must occur after resolve_attack_vs_ac")
-    if "resolve_damage" in idx and "update_hp" in idx:
-        if idx["update_hp"] < idx["resolve_damage"]:
-            errors.append("combat: update_hp must occur after resolve_damage")
-    if "resolve_damage" in idx and "apply_damage" in idx:
-        if idx["apply_damage"] < idx["resolve_damage"]:
-            errors.append("combat: apply_damage must occur after resolve_damage")
+    # Ordering constraints among action tools.
     if has_advance and has_narrate and idx["advance_turn"] < idx["narrate"]:
         errors.append("combat: advance_turn should occur after narrate")
     if has_advance and idx["advance_turn"] != (len(names) - 1):

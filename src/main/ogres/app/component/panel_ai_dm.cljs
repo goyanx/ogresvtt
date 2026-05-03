@@ -162,7 +162,7 @@
             ;; Interval
             ($ field-row {:label (str "Turn interval (" (/ interval-ms 1000) "s)")}
               ($ :input {:type "range"
-                         :min 5000 :max 60000 :step 5000
+                         :min 5000 :max 120000 :step 5000
                          :value interval-ms
                          :on-change #(update-config
                                        (fn [c] (assoc c :interval-ms

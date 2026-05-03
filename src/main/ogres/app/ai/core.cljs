@@ -61,6 +61,20 @@
 
 (def context (uix/create-context))
 
+(defn ^:private latest-chat-ui-message
+  "Returns the most recent chat UI message from :root/chat-messages, if any."
+  [db]
+  (let [root      (ds/entity db [:db/ident :root])
+        messages  (:root/chat-messages root)
+        latest    (when (seq messages)
+                    (last (sort-by :chat/timestamp messages)))
+        raw-text  (:chat/text latest)
+        text      (when (string? raw-text) (.trim raw-text))]
+    (when (seq text)
+      {:author    (:chat/author latest)
+       :text      text
+       :timestamp (:chat/timestamp latest)})))
+
 ;; ---------------------------------------------------------------------------
 ;; LLM call
 ;; ---------------------------------------------------------------------------
@@ -90,10 +104,18 @@
 
 (defn run-turn!
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
-  [conn dispatch config history set-history set-pending]
+  [conn dispatch config history set-history set-pending last-chat-ts set-last-chat-ts]
   (set-pending true)
   (let [db          @conn
         game-state  (prompt/serialize-game-state db)
+        chat-msg    (latest-chat-ui-message db)
+        chat-user-msg
+        (when (and chat-msg (not= (:timestamp chat-msg) last-chat-ts))
+          {:role "user"
+           :content (str "Latest chat UI message from "
+                         (or (:author chat-msg) "player")
+                         ": "
+                         (:text chat-msg))})
         gs          (or (-> (ds/entity db [:db/ident :user])
                             :user/camera :camera/scene :scene/grid-size)
                         grid-size)
@@ -102,7 +124,12 @@
                                 (:scenario config) game-state gs)}
         user-msg    {:role "user"
                      :content "It is your turn. Review the game state and take appropriate actions."}
-        messages    (into [system-msg] (conj (vec history) user-msg))]
+        messages    (into [system-msg]
+                          (cond-> (vec history)
+                            chat-user-msg (conj chat-user-msg)
+                            true          (conj user-msg)))]
+    (when chat-user-msg
+      (set-last-chat-ts (:timestamp chat-msg)))
     (-> (call-backend config messages)
         (.then
           (fn [response]
@@ -125,7 +152,9 @@
                   {:on-narrate speak!}))
               (set-history
                 (fn [h]
-                  (let [h (conj (vec h) user-msg (or message {:role "assistant" :content ""}))]
+                  (let [h (cond-> (vec h)
+                            chat-user-msg (conj chat-user-msg))
+                        h (conj h user-msg (or message {:role "assistant" :content ""}))]
                     (vec (take-last 20 h))))))))
         (.catch
           (fn [err]
@@ -148,6 +177,7 @@
         [config set-config]       (uix/use-state load-config)
         [pending set-pending]     (uix/use-state false)
         [history set-history]     (uix/use-state [])
+        [last-chat-ts set-last-chat-ts] (uix/use-state nil)
 
         update-config
         (uix/use-callback
@@ -162,19 +192,21 @@
         (uix/use-callback
           (fn []
             (when-not pending
-              (run-turn! conn dispatch config history set-history set-pending)))
-          [conn dispatch config history pending])
+              (run-turn! conn dispatch config history set-history set-pending
+                         last-chat-ts set-last-chat-ts)))
+          [conn dispatch config history pending last-chat-ts])
 
         send-message
         (uix/use-callback
           (fn [text]
             (when-not pending
-              (dispatch :narration/append text "host")
-              (let [user-msg {:role "user" :content text}
-                    history' (vec (take-last 20 (conj history user-msg)))]
-                (set-history history')
-                (run-turn! conn dispatch config history' set-history set-pending))))
-          [conn dispatch config history pending])
+                (dispatch :narration/append text "host")
+                (let [user-msg {:role "user" :content text}
+                      history' (vec (take-last 20 (conj history user-msg)))]
+                  (set-history history')
+                  (run-turn! conn dispatch config history' set-history set-pending
+                             last-chat-ts set-last-chat-ts))))
+          [conn dispatch config history pending last-chat-ts])
 
         ctx-value
         (uix/use-memo
