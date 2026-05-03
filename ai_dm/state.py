@@ -10,3 +10,4 @@ class DMState(TypedDict):
     validation_errors: list[str]
     retry_count: int
     narration: str
+    combat_mode: bool

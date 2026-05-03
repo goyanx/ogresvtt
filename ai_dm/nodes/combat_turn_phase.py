@@ -41,6 +41,10 @@ def enforce_combat_turn_phase(state: DMState) -> DMState:
 
     if not has_narrate:
         errors.append("combat: missing narrate tool call")
+    if not has_advance:
+        errors.append("combat: missing advance_turn; end each resolved combatant turn by advancing initiative")
+    if names.count("advance_turn") > 1:
+        errors.append("combat: advance_turn must be called exactly once per resolved turn")
     if has_hp_change and not has_attack_math:
         errors.append("combat: HP change used without attack/damage resolution")
     if "resolve_attack_vs_ac" in idx and not has_roll:
@@ -58,6 +62,8 @@ def enforce_combat_turn_phase(state: DMState) -> DMState:
             errors.append("combat: apply_damage must occur after resolve_damage")
     if has_advance and has_narrate and idx["advance_turn"] < idx["narrate"]:
         errors.append("combat: advance_turn should occur after narrate")
+    if has_advance and idx["advance_turn"] != (len(names) - 1):
+        errors.append("combat: advance_turn must be the final tool call after turn resolution")
 
     # Validate HP mutation argument shapes.
     if has_hp_change:

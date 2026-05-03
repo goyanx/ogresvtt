@@ -199,6 +199,7 @@ async def dm_turn(req: TurnRequest):
         "validation_errors": [],
         "retry_count": 0,
         "narration": "",
+        "combat_mode": False,
     }
 
     try:
