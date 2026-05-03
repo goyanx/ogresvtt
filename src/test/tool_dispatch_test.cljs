@@ -10,12 +10,13 @@
   "Builds a DataScript db with a single scene, a single NPC token at
    the given position, and optional walls and doors. Returns
    [db token-id]."
-  [& {:keys [token-pos walls doors]
-      :or {token-pos (Vec2. 35 35) walls [] doors []}}]
+  [& {:keys [token-pos walls doors scene-grid-size]
+      :or {token-pos (Vec2. 35 35) walls [] doors [] scene-grid-size grid-size}}]
   (let [db0   (initial-data true)
         user  (ds/entity db0 [:db/ident :user])
         sid   (:db/id (:camera/scene (:user/camera user)))
         tx    [{:db/id sid
+                :scene/grid-size scene-grid-size
                 :scene/walls walls
                 :scene/doors doors
                 :scene/tokens
@@ -71,6 +72,31 @@
                                {:token_id tid :direction "east" :squares 3} {})]
       (is (not (:ok r)))
       (is (zero? (count @log))))))
+
+(deftest movement-uses-scene-grid-size
+  (testing "move_player_token moves by active scene grid size"
+    (let [[db tid] (build-scene :token-pos (Vec2. 50 50) :scene-grid-size 100)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "move_player_token"
+                              {:token_id tid :direction "east" :squares 1} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))
+      (let [[event-name moved-id delta] (first @log)]
+        (is (= :objects/translate event-name))
+        (is (= tid moved-id))
+        (is (= (Vec2. 100 0) delta)))))
+  (testing "move_token snap-to-grid uses active scene grid size"
+    (let [[db tid] (build-scene :token-pos (Vec2. 50 50) :scene-grid-size 100)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "move_token"
+                              {:token_id tid :x 151 :y 49} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))
+      (let [[event-name moved-id delta] (first @log)]
+        (is (= :objects/translate event-name))
+        (is (= tid moved-id))
+        ;; 151,49 snaps to 150,50 on a 100px grid (centers at 50,150,...)
+        (is (= (Vec2. 100 0) delta))))))
 
 (deftest plan-path-tool
   (testing "returns waypoints when a path exists"

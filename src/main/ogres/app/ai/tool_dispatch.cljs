@@ -2,15 +2,26 @@
   (:require [datascript.core :as ds]
             [ogres.app.ai.narration :as narration]
             [ogres.app.collision :as collision]
-            [ogres.app.const :refer [grid-size half-size]]
+            [ogres.app.const :refer [grid-size]]
             [ogres.app.pathfind :as pathfind]
             [ogres.app.vec :refer [Vec2]]))
+
+(defn ^:private current-scene
+  "Returns the scene the local user is currently viewing."
+  [db]
+  (-> (ds/entity db [:db/ident :user])
+      :user/camera :camera/scene))
+
+(defn ^:private scene-grid-size
+  "Returns the active scene grid size in pixels."
+  [db]
+  (or (:scene/grid-size (current-scene db))
+      grid-size))
 
 (defn ^:private scene-geometry
   "Returns `[walls doors]` for the scene the local user is viewing."
   [db]
-  (let [scene (-> (ds/entity db [:db/ident :user])
-                  :user/camera :camera/scene)]
+  (let [scene (current-scene db)]
     [(or (:scene/walls scene) [])
      (or (:scene/doors scene) [])]))
 
@@ -33,9 +44,9 @@
 
 (defn ^:private snap-to-grid
   "Snaps a pixel coordinate to the nearest grid cell center."
-  [x y]
-  (let [gs grid-size
-        hs half-size
+  [x y gs]
+  (let [gs (or gs grid-size)
+        hs (/ gs 2)
         sx (+ (* (js/Math.round (/ (- x hs) gs)) gs) hs)
         sy (+ (* (js/Math.round (/ (- y hs) gs)) gs) hs)]
     (Vec2. sx sy)))
@@ -67,12 +78,13 @@
   [dispatch db _ {:keys [token_id direction squares]} _opts]
   (if (valid-token? db token_id)
     (if-let [[dx dy] (direction->delta (or direction "north"))]
-      (let [n       (max 1 (or squares 1))
+      (let [gs      (scene-grid-size db)
+            n       (max 1 (or squares 1))
             origin  (:object/point (ds/entity db token_id))
             ox      (.-x origin)
             oy      (.-y origin)
-            tx      (+ ox (* dx n grid-size))
-            ty      (+ oy (* dy n grid-size))
+            tx      (+ ox (* dx n gs))
+            ty      (+ oy (* dy n gs))
             [walls doors] (scene-geometry db)]
         (if (collision/path-blocked? walls doors ox oy tx ty)
           {:ok false :reason "Path is blocked by a wall or closed door."}
@@ -88,7 +100,7 @@
           flags  (:token/flags entity)]
       (if (contains? flags :player)
         {:ok false :reason "Cannot move player tokens."}
-        (let [target (snap-to-grid x y)
+        (let [target (snap-to-grid x y (scene-grid-size db))
               origin (:object/point entity)
               ox (.-x origin) oy (.-y origin)
               tx (.-x target) ty (.-y target)
@@ -105,7 +117,7 @@
   (let [user   (ds/entity db [:db/ident :user])
         camera (:user/camera user)
         scene  (:camera/scene camera)
-        point  (snap-to-grid x y)
+        point  (snap-to-grid x y (:scene/grid-size scene))
         shift  (:camera/point camera)
         scale  (or (:camera/scale camera) 1)
         ;; Convert scene coords to screen coords expected by :token/create.

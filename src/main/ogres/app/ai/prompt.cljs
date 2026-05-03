@@ -21,12 +21,13 @@
    :initiative/suffix])
 
 (defn- format-token
-  ([t] (format-token t nil))
-  ([t walls]
+  ([t] (format-token t nil grid-size))
+  ([t walls scene-grid-size]
    (let [pt (:object/point t)
+         wall-distance (or scene-grid-size near-wall-distance)
          near-wall? (and pt (seq walls)
                          (collision/point-near-wall?
-                          walls (.-x pt) (.-y pt) near-wall-distance))]
+                          walls (.-x pt) (.-y pt) wall-distance))]
      (str "  - id: " (:db/id t)
           ", label: \"" (or (:token/label t) "Unknown") "\""
           (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
@@ -38,6 +39,59 @@
 
 (defn- player-token? [t]
   (contains? (set (:token/flags t)) :player))
+
+(def ^:private max-proximity-rows
+  "Maximum number of NPC proximity rows included in the prompt."
+  24)
+
+(defn- px->ft
+  [px scene-grid-size]
+  (let [ft (* (/ px scene-grid-size) 5)
+        rd (js/Math.round ft)]
+    (if (< (js/Math.abs (- ft rd)) 0.001) rd
+        (.toFixed ft 1))))
+
+(defn- distance-px
+  [a b]
+  (js/Math.hypot (- (.-x b) (.-x a))
+                 (- (.-y b) (.-y a))))
+
+(defn- npc-proximity-lines
+  [npcs players walls doors scene-grid-size]
+  (let [pairs
+        (for [npc npcs
+              :let [npc-point (:object/point npc)]
+              :when npc-point
+              player players
+              :let [player-point (:object/point player)]
+              :when player-point
+              :let [px-distance (distance-px npc-point player-point)]]
+          {:npc npc
+           :player player
+           :px-distance px-distance
+           :feet-distance (* (/ px-distance scene-grid-size) 5)
+           :blocked? (collision/path-blocked?
+                      walls doors
+                      (.-x npc-point) (.-y npc-point)
+                      (.-x player-point) (.-y player-point))})
+        nearest-by-npc
+        (->> pairs
+             (group-by (comp :db/id :npc))
+             vals
+             (map (fn [rows] (first (sort-by :feet-distance rows))))
+             (sort-by :feet-distance)
+             (take max-proximity-rows))]
+    (when (seq nearest-by-npc)
+      (str
+       "\nNPC PROXIMITY TO PLAYERS (authoritative distance cues; center-to-center):\n"
+       (apply str
+              (for [{:keys [npc player px-distance feet-distance blocked?]} nearest-by-npc]
+                (str "  - NPC \"" (or (:token/label npc) "Unknown") "\" (id " (:db/id npc) ")"
+                     " -> nearest player \"" (or (:token/label player) "Unknown") "\" (id " (:db/id player) "): "
+                     (px->ft px-distance scene-grid-size) "ft"
+                     ", adjacent_5ft: " (if (<= feet-distance 5) "true" "false")
+                     ", line_of_sight_blocked: " (if blocked? "true" "false")
+                     "\n")))))))
 
 (def ^:private max-blocked-pairs
   "Maximum number of blocked-LOS pairs to include in the prompt. Caps
@@ -139,6 +193,7 @@
             initiative (ds/pull-many db token-pull (map :db/id (:scene/initiative scene)))
             rounds     (:initiative/rounds scene)
             region-context (token-region-context-lines scene all-tokens)
+            proximity-lines (npc-proximity-lines npcs players walls doors gs)
             blocked    (when (seq walls) (blocked-pairs all-tokens walls doors))]
         (str
          "SCENE: " (or (:scene/label scene) "Unnamed") "\n"
@@ -149,12 +204,13 @@
                 "  Tokens cannot move through walls or closed doors.\n"))
          "\nPLAYER TOKENS (do NOT move or remove these):\n"
          (if (seq players)
-           (apply str (map #(format-token % walls) players))
+           (apply str (map #(format-token % walls gs) players))
            "  (none)\n")
          "\nNPC/MONSTER TOKENS (you control these):\n"
          (if (seq npcs)
-           (apply str (map #(format-token % walls) npcs))
+           (apply str (map #(format-token % walls gs) npcs))
            "  (none)\n")
+         proximity-lines
          (when (seq blocked)
            (str "\nBLOCKED LINE OF SIGHT (these pairs cannot see each other):\n"
                 (apply str (map format-blocked-pair blocked))))
@@ -193,6 +249,7 @@
    "- Keep narration under 100 words per turn.\n"
    "- Always respond in English only (narration, tool text, and reasoning). Never output Thai or any other language.\n"
    "- Position coordinates are in pixels. The grid cell size is " scene-grid-size "px (= 5 feet).\n"
+   "- For proximity decisions, use the provided feet distances. A token is adjacent/melee only at 5ft or less.\n"
    "- Snap token positions to grid centers: x = col * " scene-grid-size " + " (/ scene-grid-size 2)
    ", y = row * " scene-grid-size " + " (/ scene-grid-size 2) ".\n"
    "- Token IDs are integers. Use the exact IDs from the game state below.\n"
