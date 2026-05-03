@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from ai_dm.state import DMState
 from ai_dm.tools import QUERY_TOOLS, TOOL_DEFINITIONS
@@ -43,9 +44,9 @@ Rules:
 - Use sidecar query tools first when information is uncertain.
 - Use deterministic tool calls; do not do hidden arithmetic in prose.
 - Call narrate once with concise in-world narration.
+- If any PC/NPC roll occurs this turn, narrate the actual rolled number(s).
 - Narration is player-facing: never reveal hidden map/region metadata, trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map keys like N3/N6.
 - Never include internal IDs/keys/labels from game-state internals in narration.
-- If a turn is fully resolved, advance_turn.
 - All output must be English only.
 
 ASSESSMENT:
@@ -56,12 +57,52 @@ GAME STATE:
 """
 
 
+def _extract_narrate_text(action_calls: list[dict]) -> str:
+    for tc in action_calls:
+        fn = tc.get("function", {})
+        if fn.get("name") != "narrate":
+            continue
+        try:
+            args = json.loads(fn.get("arguments", "{}"))
+        except json.JSONDecodeError:
+            return ""
+        return (args.get("text") or "").strip()
+    return ""
+
+
+def _roll_markers_from_result(result: str) -> set[str]:
+    try:
+        data = json.loads(result)
+    except json.JSONDecodeError:
+        return set()
+    markers: set[str] = set()
+    total = data.get("total")
+    natural = data.get("natural_roll")
+    if isinstance(total, int):
+        markers.add(str(total))
+    if isinstance(natural, int):
+        markers.add(str(natural))
+    return markers
+
+
+def _narration_discloses_rolls(narration_text: str, roll_markers: list[set[str]]) -> tuple[bool, list[str]]:
+    text = narration_text or ""
+    missing: list[str] = []
+    for markers in roll_markers:
+        if not markers:
+            continue
+        if not any(re.search(rf"\b{re.escape(marker)}\b", text) for marker in markers):
+            missing.append("/".join(sorted(markers)))
+    return (len(missing) == 0, missing)
+
+
 async def plan_combat(state: DMState, llm_call) -> DMState:
     prompt = COMBAT_PLAN_PROMPT.format(plan=state["plan"], game_state=state["game_state"])
     messages = list(state["history"]) + [{"role": "user", "content": prompt}]
 
     action_calls = []
     content = ""
+    roll_markers: list[set[str]] = []
 
     for _ in range(MAX_QUERY_ROUNDS):
         response = await llm_call(messages, tools=TOOL_DEFINITIONS)
@@ -73,11 +114,20 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
         action_calls = [tc for tc in tool_calls if tc["function"]["name"] not in QUERY_TOOLS]
 
         if not query_calls:
+            errors = list(state.get("validation_errors", []))
+            narration_text = _extract_narrate_text(action_calls)
+            ok, missing = _narration_discloses_rolls(narration_text, roll_markers)
+            if roll_markers and not ok:
+                errors.append(
+                    "combat narrate: include visible roll result number(s) for this turn "
+                    f"(missing: {', '.join(missing)})"
+                )
             return {
                 **state,
                 "tool_calls": action_calls,
                 "narration": content,
                 "combat_mode": True,
+                "validation_errors": errors,
             }
 
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
@@ -88,6 +138,10 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
             except json.JSONDecodeError:
                 args = {}
             result = execute_query_tool(fn_name, args, state["game_state"])
+            if fn_name == "roll_dice":
+                markers = _roll_markers_from_result(result)
+                if markers:
+                    roll_markers.append(markers)
             messages.append(
                 {
                     "role": "tool",
@@ -96,9 +150,18 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
                 }
             )
 
+    errors = list(state.get("validation_errors", []))
+    narration_text = _extract_narrate_text(action_calls)
+    ok, missing = _narration_discloses_rolls(narration_text, roll_markers)
+    if roll_markers and not ok:
+        errors.append(
+            "combat narrate: include visible roll result number(s) for this turn "
+            f"(missing: {', '.join(missing)})"
+        )
     return {
         **state,
         "tool_calls": action_calls,
         "narration": content,
         "combat_mode": True,
+        "validation_errors": errors,
     }
