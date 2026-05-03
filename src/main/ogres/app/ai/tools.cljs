@@ -86,6 +86,19 @@
       :required ["token_id" "hp"]}}}
    {:type "function"
     :function
+    {:name "apply_damage"
+     :description "Apply HP delta to a token: subtract damage or add healing. Use after damage math so you do not need absolute-HP arithmetic."
+     :parameters
+     {:type "object"
+      :properties
+      {:token_id {:type "integer" :description "The entity ID of the token."}
+       :amount {:type "integer" :description "Non-negative HP amount to apply."}
+       :mode {:type "string"
+              :enum ["damage" "healing"]
+              :description "damage subtracts HP; healing adds HP. Defaults to damage."}}
+      :required ["token_id" "amount"]}}}
+   {:type "function"
+    :function
     {:name "roll_initiative"
      :description "Add one or more tokens to the initiative tracker and roll for them."
      :parameters

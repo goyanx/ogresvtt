@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
 from typing import Any
 
@@ -74,6 +75,241 @@ def _parse_json_text(value: Any, default: Any):
     return default
 
 
+def _normalize_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[,\n;]+", value)
+        return [p.strip().lower() for p in parts if p.strip()]
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                out.append(item.strip().lower())
+        return out
+    return []
+
+
+def _parse_dice_expression(expression: str) -> list[dict]:
+    clean = (expression or "").strip().lower().replace(" ", "")
+    if not clean:
+        raise ValueError("expression is required")
+    if clean[0] not in "+-":
+        clean = "+" + clean
+    tokens = re.findall(r"[+-](?:\d*d\d+|\d+)", clean)
+    if not tokens or "".join(tokens) != clean:
+        raise ValueError(f"invalid dice expression: {expression!r}")
+
+    terms = []
+    for tok in tokens:
+        sign = -1 if tok[0] == "-" else 1
+        body = tok[1:]
+        if "d" in body:
+            count_s, sides_s = body.split("d", 1)
+            count = int(count_s) if count_s else 1
+            sides = int(sides_s)
+            if count <= 0 or count > 200:
+                raise ValueError(f"invalid dice count: {count}")
+            if sides <= 1 or sides > 1000:
+                raise ValueError(f"invalid dice sides: {sides}")
+            terms.append({"kind": "dice", "sign": sign, "count": count, "sides": sides})
+        else:
+            value = int(body)
+            terms.append({"kind": "flat", "sign": sign, "value": value})
+    return terms
+
+
+def _roll_dice_expression(args: dict) -> dict:
+    expression = args.get("expression")
+    if not isinstance(expression, str) or not expression.strip():
+        return {"error": "expression is required"}
+    try:
+        terms = _parse_dice_expression(expression)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    advantage = bool(args.get("advantage"))
+    disadvantage = bool(args.get("disadvantage"))
+    if advantage and disadvantage:
+        advantage = False
+        disadvantage = False
+
+    dice_terms = [t for t in terms if t["kind"] == "dice"]
+    can_adv = (
+        len(dice_terms) == 1
+        and dice_terms[0]["count"] == 1
+        and dice_terms[0]["sides"] == 20
+    )
+
+    breakdown = []
+    total = 0
+    natural_roll = None
+
+    for term in terms:
+        if term["kind"] == "flat":
+            signed = term["sign"] * term["value"]
+            total += signed
+            breakdown.append(
+                {
+                    "type": "flat",
+                    "value": term["value"],
+                    "sign": term["sign"],
+                    "contribution": signed,
+                }
+            )
+            continue
+
+        if can_adv and (advantage or disadvantage):
+            r1 = random.randint(1, 20)
+            r2 = random.randint(1, 20)
+            picked = max(r1, r2) if advantage else min(r1, r2)
+            natural_roll = picked if term["sign"] > 0 else None
+            subtotal = term["sign"] * picked
+            total += subtotal
+            breakdown.append(
+                {
+                    "type": "dice",
+                    "count": 1,
+                    "sides": 20,
+                    "rolls": [r1, r2],
+                    "pick": picked,
+                    "mode": "advantage" if advantage else "disadvantage",
+                    "sign": term["sign"],
+                    "contribution": subtotal,
+                }
+            )
+            continue
+
+        rolls = [random.randint(1, term["sides"]) for _ in range(term["count"])]
+        if term["sides"] == 20 and term["count"] == 1 and term["sign"] > 0:
+            natural_roll = rolls[0]
+        subtotal_raw = sum(rolls)
+        subtotal = term["sign"] * subtotal_raw
+        total += subtotal
+        breakdown.append(
+            {
+                "type": "dice",
+                "count": term["count"],
+                "sides": term["sides"],
+                "rolls": rolls,
+                "sign": term["sign"],
+                "contribution": subtotal,
+            }
+        )
+
+    return {
+        "expression": expression,
+        "total": total,
+        "natural_roll": natural_roll,
+        "used_advantage": can_adv and advantage,
+        "used_disadvantage": can_adv and disadvantage,
+        "breakdown": breakdown,
+    }
+
+
+def _resolve_attack_vs_ac(args: dict) -> dict:
+    attack_total = _safe_int(args.get("attack_total"))
+    target_ac = _safe_int(args.get("target_ac"))
+    natural_roll = _safe_int(args.get("natural_roll"))
+    crit_threshold = _safe_int(args.get("crit_threshold")) or 20
+    auto_miss_on_1 = True if args.get("auto_miss_on_1") is None else bool(args.get("auto_miss_on_1"))
+    auto_crit_on_threshold = (
+        True if args.get("auto_crit_on_threshold") is None else bool(args.get("auto_crit_on_threshold"))
+    )
+
+    if attack_total is None or target_ac is None:
+        return {"error": "attack_total and target_ac are required integers"}
+
+    hit = attack_total >= target_ac
+    critical = False
+    reason = "attack_total_vs_ac"
+
+    if natural_roll is not None:
+        if auto_miss_on_1 and natural_roll == 1:
+            hit = False
+            critical = False
+            reason = "natural_1_auto_miss"
+        elif auto_crit_on_threshold and natural_roll >= crit_threshold:
+            hit = True
+            critical = True
+            reason = f"natural_{natural_roll}_critical"
+
+    return {
+        "attack_total": attack_total,
+        "target_ac": target_ac,
+        "natural_roll": natural_roll,
+        "hit": hit,
+        "critical": critical,
+        "margin": attack_total - target_ac,
+        "reason": reason,
+    }
+
+
+def _resolve_damage(args: dict) -> dict:
+    base_damage = _safe_int(args.get("base_damage"))
+    flat_modifier = _safe_int(args.get("flat_modifier")) or 0
+    damage_type = (args.get("damage_type") or "").strip().lower()
+    save_outcome = (args.get("save_outcome") or "none").strip().lower()
+    save_effect = (args.get("save_effect") or "none").strip().lower()
+    minimum_damage = _safe_int(args.get("minimum_damage"))
+
+    if base_damage is None:
+        return {"error": "base_damage is required"}
+
+    vulnerabilities = _normalize_str_list(args.get("target_vulnerabilities"))
+    resistances = _normalize_str_list(args.get("target_resistances"))
+    immunities = _normalize_str_list(args.get("target_immunities"))
+
+    traits_raw = args.get("target_traits_json")
+    traits = _parse_json_text(traits_raw, {}) if traits_raw else {}
+    if isinstance(traits, dict):
+        vulnerabilities = sorted(set(vulnerabilities + _normalize_str_list(traits.get("vulnerabilities"))))
+        resistances = sorted(set(resistances + _normalize_str_list(traits.get("resistances"))))
+        immunities = sorted(set(immunities + _normalize_str_list(traits.get("immunities"))))
+
+    raw_damage = max(0, base_damage + flat_modifier)
+    after_save = raw_damage
+
+    if save_outcome == "success":
+        if save_effect == "negates":
+            after_save = 0
+        elif save_effect == "half":
+            after_save = after_save // 2
+
+    trait_applied = "none"
+    final_damage = after_save
+
+    if damage_type and damage_type in immunities:
+        final_damage = 0
+        trait_applied = "immunity"
+    elif damage_type and damage_type in resistances:
+        final_damage = final_damage // 2
+        trait_applied = "resistance"
+    elif damage_type and damage_type in vulnerabilities:
+        final_damage = final_damage * 2
+        trait_applied = "vulnerability"
+
+    if minimum_damage is not None and final_damage > 0:
+        final_damage = max(final_damage, minimum_damage)
+
+    return {
+        "base_damage": base_damage,
+        "flat_modifier": flat_modifier,
+        "raw_damage": raw_damage,
+        "save_outcome": save_outcome,
+        "save_effect": save_effect,
+        "after_save": after_save,
+        "damage_type": damage_type or None,
+        "traits": {
+            "vulnerabilities": vulnerabilities,
+            "resistances": resistances,
+            "immunities": immunities,
+        },
+        "trait_applied": trait_applied,
+        "final_damage": final_damage,
+    }
+
+
 def _parse_tokens(game_state: str) -> list[dict]:
     """Parse PLAYER TOKENS and NPC/MONSTER TOKENS from serialized game_state."""
     tokens = []
@@ -85,6 +321,11 @@ def _parse_tokens(game_state: str) -> list[dict]:
     )
     npc_block = re.search(
         r"NPC/MONSTER TOKENS.*?:\n(.*?)(?=\nINITIATIVE|\Z)",
+        game_state,
+        re.DOTALL,
+    )
+    initiative_block = re.search(
+        r"INITIATIVE TRACKER:\n(.*?)(?=\nROUND:|\Z)",
         game_state,
         re.DOTALL,
     )
@@ -131,10 +372,29 @@ def _parse_tokens(game_state: str) -> list[dict]:
                 results.append(token)
         return results
 
+    def parse_initiative_hp(text: str) -> dict[int, int]:
+        hp_by_id: dict[int, int] = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("- "):
+                continue
+            token_id_match = re.search(r"id:\s*(\d+)", line)
+            hp_match = re.search(r"hp:\s*(\d+)", line)
+            if token_id_match and hp_match:
+                hp_by_id[int(token_id_match.group(1))] = int(hp_match.group(1))
+        return hp_by_id
+
     if player_block:
         tokens.extend(parse_block(player_block.group(1), "player"))
     if npc_block:
         tokens.extend(parse_block(npc_block.group(1), "npc"))
+    if initiative_block:
+        hp_by_id = parse_initiative_hp(initiative_block.group(1))
+        if hp_by_id:
+            for token in tokens:
+                token_id = token.get("id")
+                if token_id in hp_by_id:
+                    token["hp"] = hp_by_id[token_id]
     return tokens
 
 
@@ -956,6 +1216,12 @@ def execute_query_tool(tool_name: str, arguments: dict, game_state: str) -> str:
                 result = _retrieve_rules(conn, arguments)
             elif tool_name == "get_monster_stats":
                 result = _get_monster_stats(conn, arguments)
+            elif tool_name == "roll_dice":
+                result = _roll_dice_expression(arguments)
+            elif tool_name == "resolve_attack_vs_ac":
+                result = _resolve_attack_vs_ac(arguments)
+            elif tool_name == "resolve_damage":
+                result = _resolve_damage(arguments)
             elif tool_name == "upsert_character":
                 result = _upsert_character(conn, arguments)
             elif tool_name == "set_character_stats":

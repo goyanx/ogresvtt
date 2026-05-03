@@ -148,6 +148,22 @@
         {:ok true})
     {:ok false :reason (str "Token " token_id " not found.")}))
 
+(defmethod dispatch-tool "apply_damage"
+  [dispatch db _ {:keys [token_id amount mode]} _opts]
+  (if (valid-token? db token_id)
+    (if (and (number? amount) (not (neg? amount)))
+      (do
+        (dispatch :initiative/change-health token_id
+                  (fn [old v]
+                    (let [base  (if (number? old) old 0)
+                          delta (if (= mode "healing") v (- v))
+                          next  (+ base delta)]
+                      (js/Math.max 0 next)))
+                  (str amount))
+        {:ok true})
+      {:ok false :reason (str "Invalid amount: " amount ". Expected a non-negative number.")})
+    {:ok false :reason (str "Token " token_id " not found.")}))
+
 (defmethod dispatch-tool "roll_initiative"
   [dispatch db _ {:keys [token_ids]} _opts]
   (let [valid-ids (filterv #(valid-token? db %) token_ids)]

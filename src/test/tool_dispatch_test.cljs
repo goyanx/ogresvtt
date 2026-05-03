@@ -98,6 +98,38 @@
         ;; 151,49 snaps to 150,50 on a 100px grid (centers at 50,150,...)
         (is (= (Vec2. 100 0) delta))))))
 
+(deftest apply-damage-tool
+  (testing "apply_damage dispatches initiative health delta for damage"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "apply_damage"
+                              {:token_id tid :amount 7} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))
+      (let [[topic id f value] (first @log)]
+        (is (= :initiative/change-health topic))
+        (is (= tid id))
+        (is (= "7" value))
+        (is (= 13 (f 20 7)))
+        (is (= 0 (f 5 10))))))
+  (testing "apply_damage supports healing mode"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "apply_damage"
+                              {:token_id tid :amount 6 :mode "healing"} {})]
+      (is (:ok r))
+      (is (= 1 (count @log)))
+      (let [[_ _ f value] (first @log)]
+        (is (= "6" value))
+        (is (= 26 (f 20 6))))))
+  (testing "apply_damage rejects negative amounts"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "apply_damage"
+                              {:token_id tid :amount -1} {})]
+      (is (not (:ok r)))
+      (is (zero? (count @log))))))
+
 (deftest plan-path-tool
   (testing "returns waypoints when a path exists"
     (let [[db _] (build-scene)

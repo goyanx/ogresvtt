@@ -37,7 +37,7 @@ Follow this sequence when relevant:
 3) For attacks, use roll_dice then resolve_attack_vs_ac.
 4) For damage, use resolve_damage (respect vulnerabilities/resistances/immunities).
 5) Consider spells, reactions, and special abilities using get_character_sheet, get_monster_stats, and retrieve_rules.
-6) Apply HP updates only after damage is resolved.
+6) Apply HP updates only after damage is resolved; prefer apply_damage for delta updates.
 
 Rules:
 - Use sidecar query tools first when information is uncertain.

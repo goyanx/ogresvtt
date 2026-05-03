@@ -8,7 +8,17 @@ Populates validation_errors; the graph retries via reflect node if non-empty.
 """
 import json
 import re
+from pydantic import ValidationError
+
 from ai_dm.state import DMState
+from ai_dm.schemas_tool_args import (
+    ApplyDamageArgs,
+    ResolveAttackVsAcArgs,
+    ResolveDamageArgs,
+    RollDiceArgs,
+    RollInitiativeArgs,
+    UpdateHpArgs,
+)
 
 # These tools must never target a player-flagged token
 PLAYER_PROTECTED = {"move_token", "remove_token"}
@@ -18,6 +28,14 @@ VALID_DIRECTIONS = {
     "northeast", "northwest", "southeast", "southwest",
 }
 MAX_RETRIES = 2
+SCHEMA_VALIDATORS = {
+    "roll_dice": RollDiceArgs,
+    "resolve_attack_vs_ac": ResolveAttackVsAcArgs,
+    "resolve_damage": ResolveDamageArgs,
+    "roll_initiative": RollInitiativeArgs,
+    "update_hp": UpdateHpArgs,
+    "apply_damage": ApplyDamageArgs,
+}
 
 
 def _extract_token_ids(game_state: str) -> set[int]:
@@ -46,6 +64,17 @@ def validate(state: DMState) -> DMState:
         except json.JSONDecodeError:
             errors.append(f"{name}: invalid JSON arguments")
             continue
+
+        model = SCHEMA_VALIDATORS.get(name)
+        if model is not None:
+            try:
+                model.model_validate(args)
+            except ValidationError as exc:
+                msg = "; ".join(
+                    f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors()
+                )
+                errors.append(f"{name}: schema validation failed ({msg})")
+                continue
 
         tid = args.get("token_id")
         if tid is not None:

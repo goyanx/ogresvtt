@@ -57,6 +57,76 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "roll_dice",
+            "description": (
+                "Roll dice from an expression like '1d20+5', '2d6+3', or '4d8-2'. "
+                "For d20 tests, advantage/disadvantage can be applied."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "Dice expression, e.g. 1d20+5"},
+                    "advantage": {"type": "boolean", "description": "Apply advantage to a single d20 roll."},
+                    "disadvantage": {"type": "boolean", "description": "Apply disadvantage to a single d20 roll."},
+                },
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_attack_vs_ac",
+            "description": (
+                "Resolve hit/miss/critical against Armor Class from a rolled attack total. "
+                "Supports natural-roll auto miss/crit behavior."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attack_total": {"type": "integer"},
+                    "target_ac": {"type": "integer"},
+                    "natural_roll": {"type": "integer", "description": "Optional raw d20 face result (1-20)."},
+                    "crit_threshold": {"type": "integer", "description": "Critical threshold, default 20."},
+                    "auto_miss_on_1": {"type": "boolean", "description": "Natural 1 auto miss, default true."},
+                    "auto_crit_on_threshold": {"type": "boolean", "description": "Natural threshold auto crit, default true."},
+                },
+                "required": ["attack_total", "target_ac"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_damage",
+            "description": (
+                "Resolve final damage after save effects and target damage traits "
+                "(vulnerabilities, resistances, immunities)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_damage": {"type": "integer"},
+                    "flat_modifier": {"type": "integer"},
+                    "damage_type": {"type": "string"},
+                    "save_outcome": {"type": "string", "description": "none|success|failure"},
+                    "save_effect": {"type": "string", "description": "none|half|negates"},
+                    "target_vulnerabilities": {"type": "array", "items": {"type": "string"}},
+                    "target_resistances": {"type": "array", "items": {"type": "string"}},
+                    "target_immunities": {"type": "array", "items": {"type": "string"}},
+                    "target_traits_json": {
+                        "type": "string",
+                        "description": "Optional JSON with vulnerabilities/resistances/immunities arrays.",
+                    },
+                    "minimum_damage": {"type": "integer", "description": "Optional minimum floor when damage > 0."},
+                },
+                "required": ["base_damage"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "upsert_character",
             "description": "Create or update a campaign character record (PC or NPC).",
             "parameters": {
@@ -490,6 +560,29 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "apply_damage",
+            "description": (
+                "Apply HP delta to a token: subtract damage or add healing. "
+                "Use this after resolve_damage so you do not recalculate absolute HP manually."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "token_id": {"type": "integer"},
+                    "amount": {"type": "integer", "description": "Non-negative HP amount to apply."},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["damage", "healing"],
+                        "description": "damage subtracts HP; healing adds HP.",
+                    },
+                },
+                "required": ["token_id", "amount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "roll_initiative",
             "description": "Add tokens to the initiative tracker and roll for them.",
             "parameters": {
@@ -546,6 +639,9 @@ QUERY_TOOLS = {
     "list_tokens",
     "retrieve_rules",
     "get_monster_stats",
+    "roll_dice",
+    "resolve_attack_vs_ac",
+    "resolve_damage",
     "upsert_character",
     "set_character_stats",
     "set_character_resources",
