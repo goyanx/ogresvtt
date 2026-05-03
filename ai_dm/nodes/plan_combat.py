@@ -33,12 +33,14 @@ COMBAT_PLAN_PROMPT = """You are the combat-resolution planner for an AI Dungeon 
 Produce legal, deterministic combat actions for the current turn.
 
 Follow this sequence when relevant:
-1) If initiative is not established, call roll_initiative for all combatants.
-2) Resolve one active participant turn at a time.
-3) For attacks, use roll_dice then resolve_attack_vs_ac.
-4) For damage, use resolve_damage (respect vulnerabilities/resistances/immunities).
-5) Consider spells, reactions, and special abilities using get_character_sheet, get_monster_stats, and retrieve_rules.
-6) Apply HP updates only after damage is resolved; prefer apply_damage for delta updates.
+1) Read INITIATIVE TRACKER first and identify the active token (current_turn: true / CURRENT TURN ID).
+2) Check token positions second (active token position, nearby targets, range/adjacency, line-of-sight cues).
+3) If initiative is not established, call roll_initiative for all combatants.
+4) Resolve one active participant turn at a time.
+5) For attacks, use roll_dice then resolve_attack_vs_ac.
+6) For damage, use resolve_damage (respect vulnerabilities/resistances/immunities).
+7) Consider spells, reactions, and special abilities using get_character_sheet, get_monster_stats, and retrieve_rules.
+8) Apply HP updates only after damage is resolved; prefer apply_damage for delta updates.
 
 Rules:
 - Use sidecar query tools first when information is uncertain.
@@ -52,6 +54,9 @@ Rules:
 
 ASSESSMENT:
 {plan}
+
+SYSTEM INSTRUCTIONS (authoritative):
+{system_prompt}
 
 GAME STATE:
 {game_state}
@@ -98,7 +103,11 @@ def _narration_discloses_rolls(narration_text: str, roll_markers: list[set[str]]
 
 
 async def plan_combat(state: DMState, llm_call) -> DMState:
-    prompt = COMBAT_PLAN_PROMPT.format(plan=state["plan"], game_state=state["game_state"])
+    prompt = COMBAT_PLAN_PROMPT.format(
+        plan=state["plan"],
+        system_prompt=state.get("system_prompt") or "(none)",
+        game_state=state["game_state"],
+    )
     messages = list(state["history"]) + [{"role": "user", "content": prompt}]
 
     action_calls = []

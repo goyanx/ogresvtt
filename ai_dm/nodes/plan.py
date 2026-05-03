@@ -52,6 +52,9 @@ Narration guardrail (player-facing):
 ASSESSMENT:
 {plan}
 
+SYSTEM INSTRUCTIONS (authoritative):
+{system_prompt}
+
 GAME STATE:
 {game_state}
 """
@@ -97,7 +100,11 @@ def _narration_discloses_rolls(narration_text: str, roll_markers: list[set[str]]
 
 
 async def plan(state: DMState, llm_call) -> DMState:
-    prompt = PLAN_PROMPT.format(plan=state["plan"], game_state=state["game_state"])
+    prompt = PLAN_PROMPT.format(
+        plan=state["plan"],
+        system_prompt=state.get("system_prompt") or "(none)",
+        game_state=state["game_state"],
+    )
     messages = list(state["history"]) + [{"role": "user", "content": prompt}]
     roll_markers: list[set[str]] = []
     action_calls: list[dict] = []

@@ -1343,6 +1343,26 @@
        [:db/add scene-id :scene/props -1]]
       [])))
 
+;; --- Chat ---
+(defmethod
+  ^{:doc "Appends a chat message to the root chat log so the Chat panel and
+          AI DM can consume the latest player/host prompt text."}
+  event-tx-fn :chat/send
+  [data _ text]
+  (let [trimmed (some-> text trim)
+        root    (ds/entity data [:db/ident :root])
+        user    (:root/user root)
+        author  (or (:user/label user) "Unknown")
+        color   (or (:user/color user) "red")]
+    (if (seq trimmed)
+      [{:db/ident :root
+        :root/chat-messages
+        {:chat/text trimmed
+         :chat/author author
+         :chat/color color
+         :chat/timestamp (.now js/Date)}}]
+      [])))
+
 ;; --- AI Dungeon Master ---
 (defmethod
   ^{:doc "Appends a narration entry to the root narration log.

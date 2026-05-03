@@ -18,6 +18,9 @@ Do NOT narrate to players yet. This is internal planning only.\nWrite your asses
 SCENARIO:
 {scenario}
 
+SYSTEM INSTRUCTIONS (authoritative):
+{system_prompt}
+
 GAME STATE:
 {game_state}
 """
@@ -26,6 +29,7 @@ GAME STATE:
 async def assess(state: DMState, llm_call) -> DMState:
     prompt = ASSESS_PROMPT.format(
         scenario=state["scenario"] or "(none)",
+        system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"] or "(empty scene)",
     )
     messages = [{"role": "user", "content": prompt}]

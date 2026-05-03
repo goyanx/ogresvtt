@@ -51,10 +51,23 @@ def _extract_player_ids(game_state: str) -> set[int]:
     return {int(m) for m in re.findall(r"id:\s*(\d+)", player_section.group())}
 
 
+def _initiative_is_active(game_state: str) -> bool:
+    text = game_state or ""
+    if "INITIATIVE TRACKER:" not in text:
+        return False
+    # Active if there are tracker entries and initiative has started.
+    has_entries = bool(re.search(r"^\s*-\s*id:\s*\d+", text, flags=re.MULTILINE))
+    has_current_turn = bool(re.search(r"CURRENT TURN ID:\s*\d+", text))
+    round_match = re.search(r"ROUND:\s*(\d+)", text)
+    rounds = int(round_match.group(1)) if round_match else 0
+    return has_entries and (has_current_turn or rounds >= 1)
+
+
 def validate(state: DMState) -> DMState:
     errors = list(state.get("validation_errors", []))
     known_ids = _extract_token_ids(state["game_state"])
     player_ids = _extract_player_ids(state["game_state"])
+    initiative_active = _initiative_is_active(state["game_state"])
 
     for tc in state["tool_calls"]:
         fn = tc.get("function", {})
@@ -75,6 +88,13 @@ def validate(state: DMState) -> DMState:
                 )
                 errors.append(f"{name}: schema validation failed ({msg})")
                 continue
+
+        if name == "roll_initiative" and initiative_active:
+            errors.append(
+                "roll_initiative: initiative is already active; resolve the current turn "
+                "with actions and advance_turn instead of re-rolling"
+            )
+            continue
 
         tid = args.get("token_id")
         if tid is not None:

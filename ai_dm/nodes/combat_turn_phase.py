@@ -7,6 +7,7 @@ the combat planner before they reach narration guard/dispatch.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ai_dm.state import DMState
@@ -20,15 +21,52 @@ def _parse_args(tc: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
+def _extract_current_turn_id(game_state: str) -> int | None:
+    text = game_state or ""
+    m = re.search(r"CURRENT TURN ID:\s*(\d+)", text)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"id:\s*(\d+).*?current_turn:\s*true", text, flags=re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _extract_token_positions(game_state: str) -> dict[int, tuple[float, float]]:
+    text = game_state or ""
+    # Serialized token lines look like:
+    # "  - id: 12, label: \"...\", pos: (123.0, 456.0), ..."
+    matches = re.findall(
+        r"id:\s*(\d+).*?pos:\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    out: dict[int, tuple[float, float]] = {}
+    for tid, x, y in matches:
+        out[int(tid)] = (float(x), float(y))
+    return out
+
+
 def enforce_combat_turn_phase(state: DMState) -> DMState:
     if not state.get("combat_mode"):
         return state
 
     errors = list(state.get("validation_errors", []))
+    game_state = state.get("game_state", "") or ""
     tool_calls = state.get("tool_calls", []) or []
     if not tool_calls:
         errors.append("combat: no tool calls produced for turn")
         return {**state, "validation_errors": errors}
+
+    turn_id = _extract_current_turn_id(game_state)
+    token_positions = _extract_token_positions(game_state)
+    if turn_id is None:
+        errors.append("combat: missing current initiative turn; cannot resolve active combatant")
+    elif turn_id not in token_positions:
+        errors.append(
+            f"combat: active initiative token {turn_id} has no position; "
+            "token-position checks cannot run"
+        )
 
     names = [tc.get("function", {}).get("name", "") for tc in tool_calls]
     idx = {name: i for i, name in enumerate(names)}

@@ -20,6 +20,13 @@
    :initiative/health
    :initiative/suffix])
 
+(defn- initiative-order
+  "Sort order used by the Initiative panel and turn advancement:
+   roll descending, then id descending."
+  [a b]
+  (let [f (juxt :initiative/roll :db/id)]
+    (compare (f b) (f a))))
+
 (defn- format-token
   ([t] (format-token t nil grid-size))
   ([t walls scene-grid-size]
@@ -192,6 +199,8 @@
             npcs       (remove player-token? all-tokens)
             initiative (ds/pull-many db token-pull (map :db/id (:scene/initiative scene)))
             rounds     (:initiative/rounds scene)
+            turn-id    (:db/id (:initiative/turn scene))
+            played-ids (into #{} (map :db/id) (:initiative/played scene))
             region-context (token-region-context-lines scene all-tokens)
             proximity-lines (npc-proximity-lines npcs players walls doors gs)
             blocked    (when (seq walls) (blocked-pairs all-tokens walls doors))]
@@ -218,8 +227,10 @@
          (when (seq initiative)
            (str
             "\nINITIATIVE TRACKER:\n"
+            "CURRENT TURN ID: " (or turn-id "none") "\n"
             (apply str
-              (for [t (sort-by (comp - (fnil identity 0) :initiative/roll) initiative)]
+              (for [t (sort initiative-order initiative)
+                    :let [id (:db/id t)]]
                 (str "  - id: " (:db/id t)
                      ", label: \"" (or (:token/label t) "Unknown") "\""
                      ", roll: " (or (:initiative/roll t) "?")
@@ -227,6 +238,10 @@
                        (str ", hp: " (:initiative/health t)))
                      (when (seq (:token/flags t))
                        (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
+                     (when (= id turn-id)
+                       ", current_turn: true")
+                     (when (contains? played-ids id)
+                       ", played: true")
                      "\n")))
             "ROUND: " (or rounds 0) "\n")))))))
 
@@ -243,6 +258,7 @@
    "RULES:\n"
    "- Use the provided tool functions to take actions.\n"
    "- Always call the 'narrate' tool once per turn to describe what happens.\n"
+   "- If initiative is active, only take actions for the token marked current_turn: true in INITIATIVE TRACKER.\n"
    "- Do NOT use move_token on player-flagged tokens — use move_player_token instead.\n"
    "- Use move_player_token ONLY when a player explicitly states their character moves (e.g. 'I move north', 'I go east 2 squares', 'I run to the door'). Infer direction from their message.\n"
    "- Do not move player tokens unless the player asked for it in this message.\n"

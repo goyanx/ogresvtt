@@ -22,6 +22,7 @@
    :root/scene-images {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/scenes       {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/session      {:db/valueType :db.type/ref :db/isComponent true}
+   :root/chat-messages {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/token-images {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/narration    {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :root/props-images {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}

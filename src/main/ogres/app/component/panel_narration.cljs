@@ -14,9 +14,10 @@
 
 (def ^:private thinking-labels
   ["Reading scene state"
+   "Checking initiative order"
+   "Selecting current combatant"
    "Checking token positions"
-   "Evaluating region context"
-   "Querying rules memory"
+   "Validating range and line of sight"
    "Planning next actions"
    "Composing narrative response"])
 

@@ -2,6 +2,7 @@ from typing import Any, TypedDict
 
 
 class DMState(TypedDict):
+    system_prompt: str
     scenario: str
     game_state: str
     history: list[dict]

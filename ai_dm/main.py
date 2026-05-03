@@ -145,6 +145,7 @@ class TurnRequest(BaseModel):
     endpoint: str = ""
     model: str = ""
     api_key: str = ""
+    system_prompt: str = ""
     scenario: str = ""
     game_state: str = ""
     history: list[dict] = []
@@ -191,6 +192,7 @@ async def dm_turn(req: TurnRequest):
 
     graph = build_graph(llm_call)
     initial_state = {
+        "system_prompt": req.system_prompt,
         "scenario": req.scenario,
         "game_state": req.game_state,
         "history": req.history,

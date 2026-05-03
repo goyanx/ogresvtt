@@ -22,6 +22,7 @@
                                :endpoint   (or ollama-endpoint "http://localhost:11434")
                                :model      (or model "")
                                :api_key    (or api-key "")
+                               :system_prompt system-text
                                :scenario   (or scenario "")
                                :game_state (or game-state "")
                                :history    history})]
@@ -41,7 +42,9 @@
                  ;; Wrap sidecar response in OpenAI-compatible envelope
                  ;; so core.cljs tool-dispatch works without changes.
                  (let [data (js->clj json :keywordize-keys true)]
-                   {:choices
+                   {:validation_errors (:validation_errors data [])
+                    :retry_count (:retry_count data 0)
+                    :choices
                     [{:message
                       {:role       "assistant"
                        :content    (:narration data "")

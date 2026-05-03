@@ -1,7 +1,8 @@
 (ns ogres.app.ai.core
   "AI Dungeon Master orchestrator. Manages configuration, the turn timer,
    LLM calls, and tool call dispatch. Runs entirely in the host's browser."
-  (:require [datascript.core :as ds]
+  (:require [clojure.string :as str]
+            [datascript.core :as ds]
             [ogres.app.ai.narration :as narration]
             [ogres.app.ai.prompt :as prompt]
             [ogres.app.ai.tool-dispatch :as tool-dispatch]
@@ -136,6 +137,7 @@
             (let [choice     (first (:choices response))
                   message    (:message choice)
                   tool-calls (:tool_calls message)
+                  validation-errors (:validation_errors response)
                   content    (:content message)
                   speak!     (fn [text]
                                (when (and (:voice-enabled config) (seq text))
@@ -143,11 +145,19 @@
                                    {:sidecar-url (:lg-endpoint config)
                                     :voice       (:voice-id config)
                                     :speed       (:voice-speed config)})))]
+              (when (and (seq validation-errors)
+                         (= (:backend config) :langgraph))
+                (dispatch :narration/append
+                  (str "[AI DM Validation] "
+                       (str/join " | " validation-errors))
+                  "system"))
               (when (and (empty? tool-calls)
+                         (not (seq validation-errors))
                          (narration/narration-text-visible? content))
                 (dispatch :narration/append content "ai")
                 (speak! content))
-              (when (seq tool-calls)
+              (when (and (seq tool-calls)
+                         (not (seq validation-errors)))
                 (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
                   {:on-narrate speak!}))
               (set-history
