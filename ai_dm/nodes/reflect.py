@@ -14,6 +14,7 @@ Original game state for reference:
 {game_state}
 
 Please correct the tool calls and try again. Only output valid tool calls.\nUse English only for any text fields.
+If narrate text was flagged for secrecy, rewrite it to avoid DM-only/internal map details (no region keys like N3/N6, no trigger notes, no internal labels/IDs).
 """
 
 

@@ -38,10 +38,15 @@ When needed, use sidecar query tools before acting:
 - list_tokens: confirm board IDs and positions.
 - retrieve_rules / get_monster_stats: rules and monster RAG grounding.
 - get_character_sheet / get_rulings: maintain continuity.
+- roll_dice / resolve_attack_vs_ac / resolve_damage: deterministic combat math.
 - record_combat_event / save_ruling: persist key outcomes.
 - upsert_map_config / list_map_configs: map metadata and render settings.\n- upsert_token_position / evaluate_triggers: location-driven narrative events.\n- show_map: switch/render selected map in the client app.
 
 After gathering enough context, call 'narrate' once plus any movement/combat/spawn tools needed.
+
+Narration guardrail (player-facing):
+- Never reveal DM-only map metadata, hidden trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map codes like N3/N6.
+- Do not mention internal IDs/keys/labels from the game state. Convert secret/internal context into sensory, in-world description only.
 
 ASSESSMENT:
 {plan}
@@ -66,7 +71,7 @@ async def plan(state: DMState, llm_call) -> DMState:
 
         if not query_calls:
             # No more queries — return action tool calls to be validated and dispatched
-            return {**state, "tool_calls": action_calls, "narration": content}
+            return {**state, "tool_calls": action_calls, "narration": content, "combat_mode": False}
 
         # Execute query tools locally and feed results back to the LLM
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
@@ -87,5 +92,5 @@ async def plan(state: DMState, llm_call) -> DMState:
         # Loop — LLM now has query results and can refine actions.
 
     # Exhausted query rounds — return whatever action calls we have
-    return {**state, "tool_calls": action_calls, "narration": content}
+    return {**state, "tool_calls": action_calls, "narration": content, "combat_mode": False}
 
