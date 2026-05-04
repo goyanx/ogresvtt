@@ -25,5 +25,11 @@ async def reflect(state: DMState, llm_call) -> DMState:
     response = await llm_call(messages, tools=TOOL_DEFINITIONS)
     message = response["choices"][0]["message"]
     tool_calls = message.get("tool_calls") or []
-    return {**state, "tool_calls": tool_calls, "retry_count": state["retry_count"] + 1}
+    return {
+        **state,
+        "tool_calls": tool_calls,
+        "retry_count": state["retry_count"] + 1,
+        # Clear stale errors so each retry pass is validated on its own output.
+        "validation_errors": [],
+    }
 

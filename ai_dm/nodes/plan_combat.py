@@ -11,6 +11,7 @@ import os
 import re
 
 from ai_dm.state import DMState
+from ai_dm.schemas_combat_turn import validate_combat_action_calls
 from ai_dm.tools import QUERY_TOOLS, TOOL_DEFINITIONS
 from ai_dm.query_executor import execute_query_tool
 
@@ -133,16 +134,12 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
                     "combat narrate: include visible roll result number(s) for this turn "
                     f"(missing: {', '.join(missing)})"
                 )
-            if requires_hp_application:
-                has_hp_apply = any(
-                    tc.get("function", {}).get("name") in {"apply_damage", "update_hp"}
-                    for tc in action_calls
+            errors.extend(
+                validate_combat_action_calls(
+                    action_calls,
+                    requires_hp_application=requires_hp_application,
                 )
-                if not has_hp_apply:
-                    errors.append(
-                        "combat: resolve_damage produced positive damage but no HP update tool was called; "
-                        "add apply_damage (preferred) or update_hp before advance_turn"
-                    )
+            )
             return {
                 **state,
                 "tool_calls": action_calls,
@@ -187,16 +184,12 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
             "combat narrate: include visible roll result number(s) for this turn "
             f"(missing: {', '.join(missing)})"
         )
-    if requires_hp_application:
-        has_hp_apply = any(
-            tc.get("function", {}).get("name") in {"apply_damage", "update_hp"}
-            for tc in action_calls
+    errors.extend(
+        validate_combat_action_calls(
+            action_calls,
+            requires_hp_application=requires_hp_application,
         )
-        if not has_hp_apply:
-            errors.append(
-                "combat: resolve_damage produced positive damage but no HP update tool was called; "
-                "add apply_damage (preferred) or update_hp before advance_turn"
-            )
+    )
     return {
         **state,
         "tool_calls": action_calls,

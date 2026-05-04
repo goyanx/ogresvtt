@@ -217,6 +217,11 @@ async def dm_turn(req: TurnRequest):
         final_state["retry_count"],
         len(final_state["narration"] or ""),
     )
+    if final_state["validation_errors"]:
+        logger.warning(
+            "dm_turn validation_errors detail=%s",
+            final_state["validation_errors"],
+        )
 
     return TurnResponse(
         tool_calls=final_state["tool_calls"],
