@@ -41,7 +41,9 @@
         time-str (when timestamp
                    (let [d (js/Date. timestamp)]
                      (str (.getHours d) ":"
-                          (.padStart (str (.getMinutes d)) 2 "0"))))]
+                          (.padStart (str (.getMinutes d)) 2 "0")
+                          ":"
+                          (.padStart (str (.getSeconds d)) 2 "0"))))]
     ($ :li.narration-entry {:data-source (or source "ai")}
       ($ :.narration-entry-header
         ($ :span.narration-entry-source

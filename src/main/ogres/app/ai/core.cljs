@@ -76,6 +76,14 @@
        :text      text
        :timestamp (:chat/timestamp latest)})))
 
+(defn ^:private current-turn-player?
+  "Returns true when initiative is active and the current turn token is a player."
+  [db]
+  (let [scene      (-> (ds/entity db [:db/ident :user]) :user/camera :camera/scene)
+        turn-token (:initiative/turn scene)
+        flags      (set (or (:token/flags turn-token) #{}))]
+    (contains? flags :player)))
+
 ;; ---------------------------------------------------------------------------
 ;; LLM call
 ;; ---------------------------------------------------------------------------
@@ -234,9 +242,13 @@
     (uix/use-effect
       (fn []
         (when (and (:enabled config) (:auto-approve config))
-          (let [id (js/setInterval trigger-turn (:interval-ms config))]
+          (let [id (js/setInterval
+                    (fn []
+                      (when-not (current-turn-player? @conn)
+                        (trigger-turn)))
+                    (:interval-ms config))]
             (fn [] (js/clearInterval id)))))
-      [config (:enabled config) (:auto-approve config) (:interval-ms config) trigger-turn])
+      [conn config (:enabled config) (:auto-approve config) (:interval-ms config) trigger-turn])
 
     ($ context {:value ctx-value}
       children)))
