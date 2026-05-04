@@ -798,9 +798,16 @@
           [{:db/id (:db/id scene)
             :initiative/turn (:db/id next)
             :initiative/played (:db/id next)}]
-          [[:db/retract (:db/id scene) :initiative/played]
-           [:db/retract (:db/id scene) :initiative/turn]
-           {:db/id (:db/id scene) :initiative/rounds (inc rounds)}]))
+          (let [[wrap] (sort initiative-order tokens)]
+            (if (some? wrap)
+              [[:db/retract (:db/id scene) :initiative/played]
+               {:db/id (:db/id scene)
+                :initiative/rounds (inc rounds)
+                :initiative/turn (:db/id wrap)
+                :initiative/played (:db/id wrap)}]
+              [[:db/retract (:db/id scene) :initiative/played]
+               [:db/retract (:db/id scene) :initiative/turn]
+               {:db/id (:db/id scene) :initiative/rounds (inc rounds)}]))))
       [{:db/id (:db/id scene) :initiative/rounds 1}])))
 
 (defmethod event-tx-fn :initiative/mark
