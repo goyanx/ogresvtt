@@ -73,20 +73,32 @@ def enforce_combat_turn_phase(state: DMState) -> DMState:
 
     has_narrate = "narrate" in idx
     has_advance = "advance_turn" in idx
+    has_leave = "leave_initiative" in idx
     has_hp_change = "update_hp" in idx or "apply_damage" in idx
 
     if not has_narrate:
         errors.append("combat: missing narrate tool call")
-    if not has_advance:
-        errors.append("combat: missing advance_turn; end each resolved combatant turn by advancing initiative")
+    if not has_advance and not has_leave:
+        errors.append(
+            "combat: missing turn terminator; end each resolved turn with advance_turn, "
+            "or call leave_initiative if combat has ended"
+        )
+    if has_advance and has_leave:
+        errors.append("combat: use either advance_turn or leave_initiative, not both")
     if names.count("advance_turn") > 1:
         errors.append("combat: advance_turn must be called exactly once per resolved turn")
+    if names.count("leave_initiative") > 1:
+        errors.append("combat: leave_initiative must be called at most once per turn")
 
     # Ordering constraints among action tools.
     if has_advance and has_narrate and idx["advance_turn"] < idx["narrate"]:
         errors.append("combat: advance_turn should occur after narrate")
+    if has_leave and has_narrate and idx["leave_initiative"] < idx["narrate"]:
+        errors.append("combat: leave_initiative should occur after narrate")
     if has_advance and idx["advance_turn"] != (len(names) - 1):
         errors.append("combat: advance_turn must be the final tool call after turn resolution")
+    if has_leave and idx["leave_initiative"] != (len(names) - 1):
+        errors.append("combat: leave_initiative must be the final tool call after turn resolution")
 
     # Validate HP mutation argument shapes.
     if has_hp_change:

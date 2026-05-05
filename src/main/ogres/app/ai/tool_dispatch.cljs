@@ -177,6 +177,11 @@
   (dispatch :initiative/next)
   {:ok true})
 
+(defmethod dispatch-tool "leave_initiative"
+  [dispatch _db _ _args _opts]
+  (dispatch :initiative/leave)
+  {:ok true})
+
 (defmethod dispatch-tool "plan_path"
   [_dispatch db _ {:keys [from_x from_y to_x to_y]} _opts]
   (let [[walls doors] (scene-geometry db)]

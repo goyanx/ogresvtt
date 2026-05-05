@@ -42,6 +42,7 @@ Follow this sequence when relevant:
 6) For damage, use resolve_damage (respect vulnerabilities/resistances/immunities).
 7) Consider spells, reactions, and special abilities using get_character_sheet, get_monster_stats, and retrieve_rules.
 8) Apply HP updates only after damage is resolved; prefer apply_damage for delta updates.
+9) If combat is clearly over (surrender/truce/retreat/all hostiles disengage), call leave_initiative as the terminal action instead of advance_turn.
 
 Rules:
 - Use sidecar query tools first when information is uncertain.

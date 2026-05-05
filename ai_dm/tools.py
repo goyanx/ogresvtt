@@ -631,6 +631,17 @@ TOOL_DEFINITIONS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "leave_initiative",
+            "description": (
+                "End initiative/combat mode and clear the initiative tracker. "
+                "Use when combat ends (surrender, retreat, truce, or all hostiles resolved)."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 

@@ -130,6 +130,12 @@
      {:type "object" :properties {}}}}
    {:type "function"
     :function
+    {:name "leave_initiative"
+     :description "End initiative/combat mode and clear the initiative tracker (use when combat is called off or fully resolved)."
+     :parameters
+     {:type "object" :properties {}}}}
+   {:type "function"
+    :function
     {:name "plan_path"
      :description "Compute a walkable route from one point to another that avoids walls and closed doors. Returns an ordered list of pixel waypoints [[x y] ...] or an error if no path exists. Use this before move_token when the map has walls and a straight line would be blocked."
      :parameters

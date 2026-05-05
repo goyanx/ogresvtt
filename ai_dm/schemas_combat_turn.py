@@ -46,6 +46,10 @@ class AdvanceTurnArgs(BaseModel):
     pass
 
 
+class LeaveInitiativeArgs(BaseModel):
+    pass
+
+
 class FunctionCallPayload(BaseModel):
     name: str
     arguments: str = "{}"
@@ -68,6 +72,7 @@ ALLOWED_COMBAT_ACTION_TOOLS = {
     "apply_damage",
     "move_player_token",
     "advance_turn",
+    "leave_initiative",
 }
 
 
@@ -78,6 +83,7 @@ ACTION_ARG_MODELS = {
     "remove_token": RemoveTokenArgs,
     "move_player_token": MovePlayerTokenArgs,
     "advance_turn": AdvanceTurnArgs,
+    "leave_initiative": LeaveInitiativeArgs,
 }
 
 
@@ -100,13 +106,27 @@ def validate_combat_action_calls(
     names = [tc.function.name for tc in envelope.tool_calls]
     if names.count("narrate") != 1:
         errors.append("combat: exactly one narrate call is required")
-    if names.count("advance_turn") != 1:
-        errors.append("combat: advance_turn must be called exactly once per resolved turn")
-    if names and names[-1] != "advance_turn":
+    has_advance = "advance_turn" in names
+    has_leave = "leave_initiative" in names
+    if has_advance and has_leave:
+        errors.append("combat: use either advance_turn or leave_initiative, not both")
+    if not has_advance and not has_leave:
+        errors.append(
+            "combat: missing turn terminator; end each resolved turn with advance_turn, "
+            "or call leave_initiative if combat has ended"
+        )
+    if names.count("advance_turn") > 1:
+        errors.append("combat: advance_turn must be called at most once per resolved turn")
+    if names.count("leave_initiative") > 1:
+        errors.append("combat: leave_initiative must be called at most once per turn")
+    if has_advance and names[-1] != "advance_turn":
         errors.append("combat: advance_turn must be the final tool call after turn resolution")
-    if "advance_turn" in names and "narrate" in names:
-        if names.index("advance_turn") < names.index("narrate"):
-            errors.append("combat: advance_turn should occur after narrate")
+    if has_leave and names[-1] != "leave_initiative":
+        errors.append("combat: leave_initiative must be the final tool call after turn resolution")
+    if has_advance and "narrate" in names and names.index("advance_turn") < names.index("narrate"):
+        errors.append("combat: advance_turn should occur after narrate")
+    if has_leave and "narrate" in names and names.index("leave_initiative") < names.index("narrate"):
+        errors.append("combat: leave_initiative should occur after narrate")
 
     if requires_hp_application:
         has_hp_apply = any(name in {"apply_damage", "update_hp"} for name in names)
