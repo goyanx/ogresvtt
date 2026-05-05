@@ -166,8 +166,15 @@
                 (speak! content))
               (when (and (seq tool-calls)
                          (not (seq validation-errors)))
-                (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
-                  {:on-narrate speak!}))
+                (let [results (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
+                                {:on-narrate speak!})
+                      failures (seq (filter (comp not :ok) results))]
+                  (when failures
+                    (js/console.warn "AI DM tool dispatch failures:" (clj->js failures))
+                    (dispatch :narration/append
+                      (str "[AI DM Tool Dispatch] "
+                           (str/join " | " (map #(or (:reason %) "Unknown dispatch error") failures)))
+                      "system"))))
               (set-history
                 (fn [h]
                   (let [h (cond-> (vec h)

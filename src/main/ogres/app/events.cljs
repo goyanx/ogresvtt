@@ -858,16 +858,32 @@
 (defmethod event-tx-fn :initiative/leave
   [data]
   (let [user (ds/entity data [:db/ident :user])
-        scene (:camera/scene (:user/camera user))]
-    (apply concat
-           [[:db/retract (:db/id scene) :scene/initiative]
-            [:db/retract (:db/id scene) :initiative/turn]
-            [:db/retract (:db/id scene) :initiative/played]
-            [:db/retract (:db/id scene) :initiative/rounds]]
-           (for [{id :db/id} (:scene/initiative scene)]
-             [[:db/retract id :initiative/roll]
-              [:db/retract id :initiative/health]
-              [:db/retract id :initiative/suffix]]))))
+        scene (:camera/scene (:user/camera user))
+        scene-id (:db/id scene)
+        tokens (vec (:scene/initiative scene))
+        played (vec (:initiative/played scene))
+        turn-id (some-> (:initiative/turn scene) :db/id)
+        rounds (:initiative/rounds scene)]
+    (vec
+     (concat
+      (for [{id :db/id} tokens]
+        [:db/retract scene-id :scene/initiative id])
+      (for [{id :db/id} played]
+        [:db/retract scene-id :initiative/played id])
+      (when turn-id
+        [[:db/retract scene-id :initiative/turn turn-id]])
+      (when (some? rounds)
+        [[:db/retract scene-id :initiative/rounds rounds]])
+      (mapcat
+       (fn [{id :db/id
+             roll :initiative/roll
+             health :initiative/health
+             suffix :initiative/suffix}]
+         (cond-> []
+           (some? roll)   (conj [:db/retract id :initiative/roll roll])
+           (some? health) (conj [:db/retract id :initiative/health health])
+           (some? suffix) (conj [:db/retract id :initiative/suffix suffix])))
+       tokens)))))
 
 ;; --- Token Images ---
 (defmethod event-tx-fn :token-images/create-many
