@@ -47,10 +47,12 @@ Rules:
 - Use sidecar query tools first when information is uncertain.
 - Use deterministic tool calls; do not do hidden arithmetic in prose.
 - Call narrate once with concise in-world narration.
+- If the latest player/host message declares a concrete player action on their turn, adjudicate it this turn (rolls/effects) instead of narrating a no-op.
 - If any PC/NPC roll occurs this turn, narrate the actual rolled number(s).
 - If resolve_damage returns positive damage, you must apply it to a target via apply_damage (preferred) or update_hp before advance_turn.
 - Narration is player-facing: never reveal hidden map/region metadata, trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map keys like N3/N6.
 - Never include internal IDs/keys/labels from game-state internals in narration.
+- Do not use the phrase "no action taken this turn" when a pending player-declared action can be resolved with available tools.
 - All output must be English only.
 
 ASSESSMENT:

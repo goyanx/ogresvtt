@@ -259,6 +259,7 @@
    "- Use the provided tool functions to take actions.\n"
    "- Always call the 'narrate' tool once per turn to describe what happens.\n"
    "- If initiative is active, only take actions for the token marked current_turn: true in INITIATIVE TRACKER.\n"
+   "- If the current_turn token is a player token and the latest player/host chat message declares an explicit action (e.g. cast, attack, dash, disengage), adjudicate that action with tools (roll_dice / resolve_attack_vs_ac / resolve_damage, then update_hp/apply_damage as needed) instead of narrating a no-op.\n"
    "- Do NOT use move_token on player-flagged tokens — use move_player_token instead.\n"
    "- Use move_player_token ONLY when a player explicitly states their character moves (e.g. 'I move north', 'I go east 2 squares', 'I run to the door'). Infer direction from their message.\n"
    "- Do not move player tokens unless the player asked for it in this message.\n"
@@ -273,6 +274,7 @@
    "- If the map has walls or closed doors, movement attempts that cross them will be rejected. Pick a path that goes around obstacles.\n"
    "- Use BLOCKED LINE OF SIGHT data: a token cannot see or shoot through a wall. An NPC should not act on information its line of sight does not give it.\n"
    "- If there is nothing to do, call narrate with brief flavor text and no other tools.\n"
+   "- Do not say 'no action taken' when a concrete player-declared action is pending resolution.\n"
    "\n"
    "CURRENT GAME STATE:\n"
    (or game-state "(empty scene)")))

@@ -92,6 +92,28 @@ def _get_or_create_scene(conn, scene_external_id: str) -> int:
     return cur.lastrowid
 
 
+def _extract_current_turn_context(game_state: str) -> tuple[int | None, str | None, bool | None]:
+    text = game_state or ""
+    turn_id_match = re.search(r"CURRENT TURN ID:\s*(\d+)", text)
+    turn_id = int(turn_id_match.group(1)) if turn_id_match else None
+    if turn_id is None:
+        return (None, None, None)
+
+    # Initiative lines are serialized as:
+    # - id: 17, label: "Algoreth", roll: 16, flags: [player], current_turn: true
+    line_match = re.search(
+        rf"^\s*-\s*id:\s*{turn_id}\s*,\s*label:\s*\"([^\"]*)\"(?P<rest>.*)$",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if not line_match:
+        return (turn_id, None, None)
+    label = line_match.group(1) or None
+    rest = line_match.group("rest") or ""
+    is_player = bool(re.search(r"flags:\s*\[[^\]]*\bplayer\b[^\]]*\]", rest, flags=re.IGNORECASE))
+    return (turn_id, label, is_player)
+
+
 _load_env_files()
 log_path = configure_logging()
 logger = logging.getLogger("ai_dm.main")
@@ -181,13 +203,17 @@ async def dm_turn(req: TurnRequest):
     else:
         raise HTTPException(status_code=400, detail=f"Unknown backend: {req.backend}")
 
+    turn_id, turn_label, turn_is_player = _extract_current_turn_context(req.game_state or "")
     logger.info(
-        "dm_turn start backend=%s model=%s endpoint=%s history_count=%s game_state_chars=%s",
+        "dm_turn start backend=%s model=%s endpoint=%s history_count=%s game_state_chars=%s turn_id=%s turn_label=%s turn_is_player=%s",
         backend,
         model,
         endpoint if backend == "ollama" else "-",
         len(req.history),
         len(req.game_state or ""),
+        turn_id,
+        turn_label or "-",
+        turn_is_player,
     )
 
     graph = build_graph(llm_call)
