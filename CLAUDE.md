@@ -42,7 +42,12 @@ AI DM supports:
 - Optional Kokoro TTS
 
 LangGraph flow currently:
-- `assess_situation -> plan_actions -> validate -> reflect_retry`
+- `assess_situation -> (plan_actions | plan_combat_actions) -> combat_turn_phase -> guard_narration -> validate -> reflect_retry`
+
+Combat runtime behavior:
+- auto-approve skips automatic DM turns when current turn token is player-controlled
+- explicit combat shutdown supported via `leave_initiative` action tool
+- sidecar logs include `turn_id`, `turn_label`, `turn_is_player`, and tool call details
 
 ## Sidecar Data Layer
 

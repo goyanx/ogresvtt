@@ -63,6 +63,7 @@
 **AI Dungeon Master** *(experimental)*
 - LLM-powered DM that reads the live board and controls NPC/monster tokens
 - Spawns, moves, and removes tokens; rolls initiative; updates HP
+- Can end combat cleanly by leaving initiative when surrender/truce/retreat resolves an encounter
 - Narrates events to all players in real time via the DM Narration panel
 - Two-way chat — ask the DM questions and get in-character responses
 - Voice narration via Kokoro TTS (British male narrator by default)
@@ -170,6 +171,13 @@ Supported env keys:
 5. Enable **Auto-approve** + set interval for autonomous turns.
 6. Use **T (Narration)** panel to view output or chat with the DM.
 
+AI DM combat behavior notes:
+- Auto-approve timer skips automatic turns while the current initiative token is a player token.
+- In LangGraph mode, sidecar logs include current turn context and selected action tools:
+  - `turn_id`, `turn_label`, `turn_is_player`
+  - `dm_turn tool_calls detail=[...]`
+- When combat is over, the DM may emit `leave_initiative` to clear initiative state.
+
 ### 8) Voice narration (optional)
 
 Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M).
@@ -190,6 +198,10 @@ Windows phonemization may require espeak-ng:
   - Ensure sidecar is running on `http://localhost:8765`.
 - No multiplayer sync
   - Ensure Clojure backend is running on port `5000`.
+- DM says combat ended but initiative still visible
+  - Ensure frontend is rebuilt/reloaded after pulling latest changes.
+  - Confirm sidecar log has `dm_turn tool_calls detail=['narrate', 'leave_initiative']`.
+  - If action dispatch fails, Narration panel shows `[AI DM Tool Dispatch] ...` with reason.
 
 ## Panel Reference
 

@@ -150,8 +150,22 @@ The planning loop can call these internal tools:
 
 These execute inside sidecar and do not go to browser tool dispatch.
 
-Action tool (dispatched to client):
+Action tools (dispatched to client):
 - `show_map` — switch/create target scene and apply map render settings in-app.
+- `move_token`, `spawn_token`, `remove_token`
+- `update_hp`, `apply_damage`
+- `roll_initiative`, `advance_turn`
+- `leave_initiative` — end combat/initiative mode and clear tracker state.
+
+## Runtime Diagnostics
+
+LangGraph sidecar logs (`logs/ai_dm.log`) include turn-level context and chosen actions:
+- `turn_id`, `turn_label`, `turn_is_player` on `dm_turn start`
+- `dm_turn tool_calls detail=[...]` on success
+- full `validation_errors` details when validation fails
+
+Client-side dispatch failures are surfaced in Narration as:
+- `[AI DM Tool Dispatch] ...`
 
 ## Notes
 

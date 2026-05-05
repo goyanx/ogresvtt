@@ -29,6 +29,9 @@ The host can run AI-assisted encounters where narration, tactical actions, map c
 - RAG ingestion utility for manual text/markdown compendium sources.
 - Sidecar admin UI/API at `/dm-admin` for inspection and SQL operations.
 - Map scene configuration persistence and `show_map` action tool wiring to client.
+- Combat-end action tooling (`leave_initiative`) wired sidecar → client dispatch.
+- Sidecar turn diagnostics (`turn_id`, `turn_label`, `turn_is_player`, tool call detail logging).
+- Auto-approve guard to skip automatic DM turns while current initiative token is player-controlled.
 
 ## Out of Scope (Current)
 
@@ -44,6 +47,7 @@ The host can run AI-assisted encounters where narration, tactical actions, map c
 - Calls either direct backend or sidecar.
 - Dispatches validated action tools to existing app events.
 - Handles `show_map` to switch/render configured map scenes.
+- Supports DM-triggered `leave_initiative` for explicit combat shutdown.
 
 Key files:
 - `src/main/ogres/app/ai/tools.cljs`
@@ -117,6 +121,7 @@ Docs:
 - Sidecar reaches Ollama/Grok and returns tool-based turn outputs.
 - DM narration and board actions are visible in client.
 - DM can request map display through `show_map`.
+- DM can explicitly end combat mode through `leave_initiative`.
 - SQLite initializes automatically and stores campaign + RAG data.
 - Admin UI is reachable and can inspect/update map config rows.
 
