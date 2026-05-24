@@ -1391,12 +1391,18 @@
   ^{:doc "Appends a narration entry to the root narration log.
           Source is a string: 'ai', 'host', or 'system'."}
   event-tx-fn :narration/append
-  [_ _ text source]
-  [{:db/ident :root
-    :root/narration
-    {:narration/text text
-     :narration/timestamp (.now js/Date)
-     :narration/source (or source "ai")}}])
+  ([_ _ text source]
+   [[:db.fn/call event-tx-fn :narration/append text source nil]])
+  ([_ _ text source meta]
+   (let [entry (cond-> {:narration/text text
+                        :narration/timestamp (.now js/Date)
+                        :narration/source (or source "ai")}
+                 (seq (:image-url meta))
+                 (assoc :narration/image-url (:image-url meta))
+                 (seq (:image-alt meta))
+                 (assoc :narration/image-alt (:image-alt meta)))]
+     [{:db/ident :root
+       :root/narration entry}])))
 
 (defmethod
   ^{:doc "Clears all narration entries from the root entity."}

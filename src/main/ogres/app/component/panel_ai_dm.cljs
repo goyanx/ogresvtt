@@ -20,7 +20,7 @@
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
             {:keys [enabled backend lg-backend endpoint model scenario auto-approve interval-ms
-                    voice-enabled voice-id voice-speed]} config]
+                    voice-enabled voice-id voice-speed comfy-enabled comfy-endpoint comfy-workflow]} config]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")
@@ -36,6 +36,13 @@
                          :checked (boolean enabled)
                          :on-change #(update-config
                                        (fn [c] (assoc c :enabled (not enabled))))}))
+
+            ;; Optional image generation toggle (always visible)
+            ($ field-row {:label "Enable narration images"}
+              ($ :input {:type "checkbox"
+                         :checked (boolean comfy-enabled)
+                         :on-change #(update-config
+                                       (fn [c] (assoc c :comfy-enabled (not comfy-enabled))))}))
 
             ;; Backend
             ($ field-row {:label "Backend"}
@@ -82,6 +89,26 @@
                    :placeholder "http://localhost:8765"
                    :on-change #(update-config
                                  (fn [c] (assoc c :lg-endpoint (.. % -target -value))))})))
+
+            ;; ComfyUI endpoint (sidecar image generation)
+            (when (= backend :langgraph)
+              ;; ComfyUI endpoint (sidecar image generation)
+              ($ field-row {:label "ComfyUI URL"}
+                ($ :input.text
+                  {:type "text"
+                   :value (or comfy-endpoint "")
+                   :placeholder "http://127.0.0.1:8188"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-endpoint (.. % -target -value))))}))
+
+              ;; ComfyUI workflow graph JSON (used by DM Narration Generate art action)
+              ($ field-row {:label "Comfy workflow JSON"}
+                ($ :textarea.text
+                  {:rows 6
+                   :value (or comfy-workflow "")
+                   :placeholder "{\"3\":{\"inputs\":{...},\"class_type\":\"KSampler\"}, ... }"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-workflow (.. % -target -value))))})))
 
             ;; Grok API key
             (when (or (= backend :grok)
@@ -172,7 +199,7 @@
             (case backend
               :ollama    "Ensure Ollama is running with OLLAMA_ORIGINS=* for CORS support."
               :grok      "Your API key is stored in this browser only and never sent to the OgresVTT server."
-              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload. In Grok mode, leave Model blank to use .env.local defaults."
+              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload. In Grok mode, leave Model blank to use .env.local defaults. Turn on narration images, configure Comfy workflow JSON, then use Generate art in DM Narration. A LangGraph prompt agent rewrites narration into model-friendly Comfy prompts."
               ""))))
       ;; Non-host or context not available
       ($ :.ai-dm

@@ -4,6 +4,7 @@ AI Dungeon Master FastAPI sidecar.
 Endpoints:
   POST /dm/turn   — LangGraph multi-step turn (returns tool calls + narration)
   POST /dm/speak  — Kokoro TTS (returns WAV audio bytes)
+  POST /dm/comfy/generate — Queue/poll ComfyUI workflow and return output image URLs
   GET  /dm/voices — List available TTS voices
   GET  /health
 
@@ -18,22 +19,25 @@ Start with:
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
+import httpx
 from pydantic import BaseModel
 
 from ai_dm.backends import grok, ollama
 from ai_dm.db import get_conn, init_db, list_tables, resolve_db_path
-from ai_dm.graph import build_graph
+from ai_dm.graph import build_graph, build_image_prompt_graph
 from ai_dm.logging_config import configure_logging
 
 
@@ -114,6 +118,140 @@ def _extract_current_turn_context(game_state: str) -> tuple[int | None, str | No
     return (turn_id, label, is_player)
 
 
+def _normalize_base_url(url: str | None, fallback: str) -> str:
+    value = (url or fallback or "").strip()
+    return value.rstrip("/")
+
+
+def _load_workflow_payload(workflow: dict | str | None) -> dict:
+    if workflow is None:
+        raise HTTPException(status_code=400, detail="workflow is required")
+    if isinstance(workflow, dict):
+        return workflow
+    if not isinstance(workflow, str):
+        raise HTTPException(status_code=400, detail="workflow must be an object or JSON/path string")
+
+    raw = workflow.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="workflow must not be empty")
+
+    if raw.startswith("{") or raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"workflow JSON parse failed: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail="workflow JSON root must be an object")
+        return parsed
+
+    path = Path(raw)
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"workflow file not found: {raw}")
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"failed to read workflow file: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="workflow file root must be an object")
+    return parsed
+
+
+def _resolve_llm_call(
+    *,
+    backend: str,
+    endpoint: str,
+    model: str,
+    api_key: str,
+):
+    resolved_backend = (backend or DEFAULT_BACKEND or "ollama").strip().lower()
+    if resolved_backend == "ollama":
+        resolved_endpoint = (endpoint or DEFAULT_OLLAMA_ENDPOINT).strip()
+        resolved_model = (model or DEFAULT_OLLAMA_MODEL).strip()
+        llm_call = functools.partial(
+            ollama.chat_completion, endpoint=resolved_endpoint, model=resolved_model
+        )
+        return llm_call, resolved_backend, resolved_endpoint, resolved_model
+    if resolved_backend == "grok":
+        resolved_api_key = (
+            api_key
+            or _env_first("XAI_API_KEY", "GROK_API_KEY", "AI_DM_GROK_API_KEY")
+        ).strip()
+        resolved_model = (model or DEFAULT_GROK_MODEL).strip()
+        if not resolved_api_key:
+            raise HTTPException(status_code=400, detail="api_key required for grok backend")
+        llm_call = functools.partial(
+            grok.chat_completion, api_key=resolved_api_key, model=resolved_model
+        )
+        return llm_call, resolved_backend, "-", resolved_model
+    raise HTTPException(status_code=400, detail=f"Unknown backend: {backend}")
+
+
+def _replace_prompt_placeholders(value, positive: str, negative: str, source: str):
+    if isinstance(value, str):
+        replaced = (
+            value.replace("{{prompt}}", positive)
+            .replace("{{positive_prompt}}", positive)
+            .replace("{{negative_prompt}}", negative)
+            .replace("{{source_prompt}}", source)
+        )
+        return replaced, replaced != value
+    if isinstance(value, list):
+        changed = False
+        out = []
+        for item in value:
+            next_item, item_changed = _replace_prompt_placeholders(item, positive, negative, source)
+            out.append(next_item)
+            changed = changed or item_changed
+        return out, changed
+    if isinstance(value, dict):
+        changed = False
+        out = {}
+        for k, v in value.items():
+            next_v, node_changed = _replace_prompt_placeholders(v, positive, negative, source)
+            out[k] = next_v
+            changed = changed or node_changed
+        return out, changed
+    return value, False
+
+
+def _inject_prompts_heuristic(workflow: dict, positive: str, negative: str):
+    if not isinstance(workflow, dict):
+        return workflow, False
+
+    text_slots: list[tuple[dict, str, str]] = []
+    for node_key, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for field in ("text", "prompt", "positive_prompt", "negative_prompt"):
+            if isinstance(inputs.get(field), str):
+                text_slots.append((inputs, field, str(node_key).lower()))
+
+    if not text_slots:
+        return workflow, False
+
+    # Prefer negative-ish slots for negative prompt when possible.
+    negative_idx = None
+    for idx, (_inputs, field, node_key) in enumerate(text_slots):
+        if "neg" in field or "neg" in node_key:
+            negative_idx = idx
+            break
+
+    # Always assign one positive slot.
+    text_slots[0][0][text_slots[0][1]] = positive
+    changed = True
+
+    if negative:
+        if negative_idx is not None:
+            inputs, field, _ = text_slots[negative_idx]
+            inputs[field] = negative
+        elif len(text_slots) > 1:
+            text_slots[1][0][text_slots[1][1]] = negative
+    return workflow, changed
+
+
 _load_env_files()
 log_path = configure_logging()
 logger = logging.getLogger("ai_dm.main")
@@ -130,6 +268,14 @@ DEFAULT_GROK_MODEL = _env_first(
     "AI_DM_GROK_MODEL", "GROK_MODEL", "XAI_MODEL", default="grok-3-mini"
 )
 DEFAULT_BACKEND = _env_first("AI_DM_DEFAULT_BACKEND", default="ollama").strip().lower()
+DEFAULT_COMFY_BASE_URL = _env_first(
+    "AI_DM_COMFY_BASE_URL", "COMFY_BASE_URL", default="http://127.0.0.1:8188"
+)
+DEFAULT_COMFY_POLL_INTERVAL = float(_env_first("COMFY_POLL_INTERVAL", default="0.5"))
+DEFAULT_COMFY_TIMEOUT_SECS = int(_env_first("COMFY_TIMEOUT_SECS", default="240"))
+DEFAULT_COMFY_MODEL_FAMILY = _env_first(
+    "AI_DM_COMFY_MODEL_FAMILY", default="flux"
+).strip().lower()
 
 app = FastAPI(title="AI DM LangGraph Sidecar")
 
@@ -182,26 +328,12 @@ class TurnResponse(BaseModel):
 
 @app.post("/dm/turn", response_model=TurnResponse)
 async def dm_turn(req: TurnRequest):
-    backend = (req.backend or DEFAULT_BACKEND or "ollama").strip().lower()
-    if backend == "ollama":
-        endpoint = (req.endpoint or DEFAULT_OLLAMA_ENDPOINT).strip()
-        model = (req.model or DEFAULT_OLLAMA_MODEL).strip()
-        llm_call = functools.partial(
-            ollama.chat_completion, endpoint=endpoint, model=model
-        )
-    elif backend == "grok":
-        api_key = (
-            req.api_key
-            or _env_first("XAI_API_KEY", "GROK_API_KEY", "AI_DM_GROK_API_KEY")
-        ).strip()
-        model = (req.model or DEFAULT_GROK_MODEL).strip()
-        if not api_key:
-            raise HTTPException(status_code=400, detail="api_key required for grok backend")
-        llm_call = functools.partial(
-            grok.chat_completion, api_key=api_key, model=model
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown backend: {req.backend}")
+    llm_call, backend, endpoint, model = _resolve_llm_call(
+        backend=req.backend,
+        endpoint=req.endpoint,
+        model=req.model,
+        api_key=req.api_key,
+    )
 
     turn_id, turn_label, turn_is_player = _extract_current_turn_context(req.game_state or "")
     logger.info(
@@ -306,6 +438,179 @@ def dm_voices():
 
 
 # ---------------------------------------------------------------------------
+# /dm/comfy/generate  — ComfyUI image generation via sidecar
+# ---------------------------------------------------------------------------
+
+class ComfyGenerateRequest(BaseModel):
+    workflow: dict | str | None = None
+    comfy_base_url: str = ""
+    client_id: str = ""
+    poll_interval: float | None = None
+    timeout_secs: int | None = None
+    prompt_text: str = ""
+    prompt_style: str = ""
+    prompt_model_family: str = ""
+    llm_backend: str = ""
+    llm_endpoint: str = ""
+    llm_model: str = ""
+    api_key: str = ""
+
+
+class ComfyImage(BaseModel):
+    filename: str
+    subfolder: str
+    type: str
+    view_url: str
+
+
+class ComfyGenerateResponse(BaseModel):
+    prompt_id: str
+    image_count: int
+    source_prompt: str
+    positive_prompt: str
+    negative_prompt: str
+    images: list[ComfyImage]
+
+
+@app.post("/dm/comfy/generate", response_model=ComfyGenerateResponse)
+async def dm_comfy_generate(req: ComfyGenerateRequest):
+    workflow_prompt = _load_workflow_payload(req.workflow)
+    comfy_base_url = _normalize_base_url(req.comfy_base_url, DEFAULT_COMFY_BASE_URL)
+    client_id = (req.client_id or os.getenv("COMFY_CLIENT_ID", "ogresvtt-dm-sidecar")).strip()
+    poll_interval = (
+        float(req.poll_interval) if req.poll_interval is not None else DEFAULT_COMFY_POLL_INTERVAL
+    )
+    timeout_secs = int(req.timeout_secs) if req.timeout_secs is not None else DEFAULT_COMFY_TIMEOUT_SECS
+    source_prompt = (req.prompt_text or "").strip()
+    style_hint = (req.prompt_style or "").strip()
+    model_family = (req.prompt_model_family or DEFAULT_COMFY_MODEL_FAMILY or "flux").strip().lower()
+    positive_prompt = source_prompt
+    negative_prompt = ""
+
+    if source_prompt:
+        llm_call, llm_backend, llm_endpoint, llm_model = _resolve_llm_call(
+            backend=req.llm_backend,
+            endpoint=req.llm_endpoint,
+            model=req.llm_model,
+            api_key=req.api_key,
+        )
+        logger.info(
+            "dm_comfy_generate prompt_transform start backend=%s model=%s endpoint=%s model_family=%s",
+            llm_backend,
+            llm_model,
+            llm_endpoint,
+            model_family,
+        )
+        prompt_graph = build_image_prompt_graph(llm_call)
+        transformed = await prompt_graph.ainvoke(
+            {
+                "source_prompt": source_prompt,
+                "style_hint": style_hint,
+                "model_family": model_family,
+            }
+        )
+        positive_prompt = (transformed.get("positive_prompt") or source_prompt).strip()
+        negative_prompt = (transformed.get("negative_prompt") or "").strip()
+    if not positive_prompt:
+        positive_prompt = "fantasy tabletop scene, cinematic lighting, detailed environment"
+
+    # Apply transformed prompts to workflow:
+    # 1) token placeholders if present, else 2) heuristic assignment.
+    workflow_prompt, replaced = _replace_prompt_placeholders(
+        workflow_prompt, positive_prompt, negative_prompt, source_prompt
+    )
+    if not replaced:
+        workflow_prompt, _ = _inject_prompts_heuristic(
+            workflow_prompt, positive_prompt, negative_prompt
+        )
+
+    logger.info(
+        "dm_comfy_generate start comfy_base_url=%s client_id=%s timeout_secs=%s poll_interval=%s source_prompt_chars=%s",
+        comfy_base_url,
+        client_id,
+        timeout_secs,
+        poll_interval,
+        len(source_prompt),
+    )
+
+    timeout = httpx.Timeout(timeout_secs)
+    queue_payload = {"prompt": workflow_prompt, "client_id": client_id}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            queue_resp = await client.post(f"{comfy_base_url}/prompt", json=queue_payload)
+            queue_resp.raise_for_status()
+            queued = queue_resp.json()
+            prompt_id = queued.get("prompt_id")
+            if not prompt_id:
+                raise HTTPException(status_code=502, detail=f"ComfyUI queue failed: {queued}")
+
+            history_url = f"{comfy_base_url}/history/{prompt_id}"
+            deadline = asyncio.get_running_loop().time() + timeout_secs
+            outputs = {}
+            while asyncio.get_running_loop().time() < deadline:
+                history_resp = await client.get(history_url)
+                history_resp.raise_for_status()
+                history = history_resp.json() or {}
+                entry = history.get(prompt_id) or {}
+                outputs = entry.get("outputs") or {}
+                if outputs:
+                    break
+                await asyncio.sleep(poll_interval)
+
+            if not outputs:
+                raise HTTPException(status_code=504, detail="Timed out waiting for ComfyUI outputs")
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as exc:
+        logger.exception("dm_comfy_generate upstream HTTP error")
+        status = exc.response.status_code if exc.response is not None else 502
+        detail = f"ComfyUI HTTP error {status}: {exc.response.text if exc.response is not None else exc}"
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        logger.exception("dm_comfy_generate upstream connection error")
+        raise HTTPException(status_code=502, detail=f"ComfyUI connection error: {exc}") from exc
+    except Exception as exc:
+        logger.exception("dm_comfy_generate failed")
+        raise HTTPException(status_code=500, detail=f"Failed to generate ComfyUI images: {exc}") from exc
+
+    images: list[ComfyImage] = []
+    for node_out in outputs.values():
+        for img in (node_out.get("images") or []):
+            filename = img.get("filename")
+            if not filename:
+                continue
+            subfolder = img.get("subfolder", "")
+            img_type = img.get("type", "output")
+            query = urlencode(
+                {"filename": filename, "subfolder": subfolder, "type": img_type},
+                safe="/",
+            )
+            images.append(
+                ComfyImage(
+                    filename=filename,
+                    subfolder=subfolder,
+                    type=img_type,
+                    view_url=f"{comfy_base_url}/view?{query}",
+                )
+            )
+
+    logger.info(
+        "dm_comfy_generate success prompt_id=%s image_count=%s",
+        prompt_id,
+        len(images),
+    )
+    return ComfyGenerateResponse(
+        prompt_id=prompt_id,
+        image_count=len(images),
+        source_prompt=source_prompt,
+        positive_prompt=positive_prompt,
+        negative_prompt=negative_prompt,
+        images=images,
+    )
+
+
+# ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
 
@@ -323,6 +628,8 @@ def health():
             "ollama_endpoint": DEFAULT_OLLAMA_ENDPOINT,
             "ollama_model": DEFAULT_OLLAMA_MODEL,
             "grok_model": DEFAULT_GROK_MODEL,
+            "comfy_base_url": DEFAULT_COMFY_BASE_URL,
+            "comfy_model_family": DEFAULT_COMFY_MODEL_FAMILY,
         },
         "db": {
             "path": str(resolve_db_path()),

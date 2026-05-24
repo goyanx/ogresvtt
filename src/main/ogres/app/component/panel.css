@@ -277,7 +277,21 @@
 .form[data-form="narration"] .form-body,
 .narration,
 .narration-list,
-.narration-entry-text {
+.narration-entry,
+.narration-entry-text,
+.narration-entry-text * {
   user-select: text;
   -webkit-user-select: text;
+}
+
+.narration-entry-figure {
+  margin: 6px 0 0;
+}
+
+.narration-entry-image {
+  border-radius: 4px;
+  border: 1px solid var(--color-black-300);
+  display: block;
+  height: auto;
+  max-width: 100%;
 }

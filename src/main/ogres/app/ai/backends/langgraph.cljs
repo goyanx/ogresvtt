@@ -45,7 +45,40 @@
                    {:validation_errors (:validation_errors data [])
                     :retry_count (:retry_count data 0)
                     :choices
-                    [{:message
+                   [{:message
                       {:role       "assistant"
                        :content    (:narration data "")
                        :tool_calls (:tool_calls data [])}}]}))))))
+
+(defn comfy-generate
+  "Sends a ComfyUI workflow request via the LangGraph sidecar.
+   Returns a js/Promise resolving to {:prompt_id :image_count :images}."
+  [{:keys [endpoint comfy-endpoint workflow client-id poll-interval timeout-secs
+           prompt-text prompt-style prompt-model-family llm-backend llm-endpoint llm-model]}]
+  (let [url  (str endpoint "/dm/comfy/generate")
+        api-key (.getItem js/localStorage "ai-dm-api-key")
+        body (clj->js {:workflow      workflow
+                       :comfy_base_url (or comfy-endpoint "")
+                       :client_id     (or client-id "")
+                       :poll_interval poll-interval
+                       :timeout_secs  timeout-secs
+                       :prompt_text   (or prompt-text "")
+                       :prompt_style  (or prompt-style "")
+                       :prompt_model_family (or prompt-model-family "")
+                       :llm_backend   (or llm-backend "")
+                       :llm_endpoint  (or llm-endpoint "")
+                       :llm_model     (or llm-model "")
+                       :api_key       (or api-key "")})]
+    (-> (js/fetch url
+          #js {:method  "POST"
+               :headers #js {"Content-Type" "application/json"}
+               :body    (js/JSON.stringify body)})
+        (.then (fn [resp]
+                 (if (.-ok resp)
+                   (.json resp)
+                   (-> (.text resp)
+                       (.then (fn [text]
+                                (throw (js/Error.
+                                         (str "LangGraph sidecar comfy error "
+                                              (.-status resp) ": " text)))))))))
+        (.then (fn [json] (js->clj json :keywordize-keys true))))))
