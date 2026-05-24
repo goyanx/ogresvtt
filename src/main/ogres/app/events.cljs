@@ -98,6 +98,17 @@
   (let [user (ds/entity data [:db/ident :user])]
     [{:db/ident :user :panel/expanded (not (get user :panel/expanded true))}]))
 
+(def ^:private panel-width-min 360)
+(def ^:private panel-width-max 1100)
+
+(defmethod
+  ^{:doc "Changes the expanded side-panel width in pixels."}
+  event-tx-fn :panel/change-width
+  [_ _ width]
+  (let [width (if (number? width) width 640)
+        width (js/Math.round (constrain width panel-width-min panel-width-max))]
+    [{:db/ident :user :panel/width width}]))
+
 (defmethod
   ^{:doc "Changes the character label for the given user."}
   event-tx-fn :user/change-label

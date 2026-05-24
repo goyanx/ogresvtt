@@ -63,6 +63,7 @@
     [:db/add -3 :user/cameras -4]
     [:db/add -3 :user/host host]
     [:db/add -3 :panel/selected :tokens]
+    [:db/add -3 :panel/width 640]
     [:db/add -4 :camera/scene -2]
     [:db/add -4 :camera/point vec/zero]
     [:db/add -5 :db/ident :session]]))

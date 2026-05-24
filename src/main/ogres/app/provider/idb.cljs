@@ -76,6 +76,40 @@
         stores (.map stores (fn [store] (marshal-store idb store)))]
     (.then (js/Promise.all stores) js/Object.fromEntries)))
 
+(def ^:private backup-version 2)
+(def ^:private backup-stores #js ["app" "images"])
+(def ^:private local-setting-keys #js ["ai-dm-config" "ai-dm-api-key"])
+
+(defn ^:private capture-local-settings []
+  (reduce
+   (fn [result key]
+     (let [value (.getItem js/localStorage key)]
+       (if (string? value)
+         (doto result (aset key value))
+         result)))
+   #js {}
+   (array-seq local-setting-keys)))
+
+(defn ^:private restore-local-settings! [settings]
+  (let [settings (or settings #js {})]
+    (doseq [key (array-seq local-setting-keys)]
+      (let [value (aget settings key)]
+        (if (string? value)
+          (.setItem js/localStorage key value)
+          (.removeItem js/localStorage key))))))
+
+(defn ^:private wrap-backup [stores]
+  #js {"version" backup-version
+       "stores" stores
+       "localSettings" (capture-local-settings)})
+
+(defn ^:private normalize-backup [decoded]
+  (if (and (some? decoded) (some? (aget decoded "stores")))
+    #js {"stores" (aget decoded "stores")
+         "localSettings" (or (aget decoded "localSettings") #js {})}
+    #js {"stores" decoded
+         "localSettings" #js {}}))
+
 (defn ^:private unmarshal-value [value]
   (if (instance? js/Uint8Array. value)
     (js/Blob. #js [value] #js {"type" "image/jpeg"})
@@ -97,8 +131,8 @@
 
 (defn ^:private replace-store
   "Removes all records from the given object store and replaces them
-   with the given records. Returns a Promise which resolves when the
-   transaction is completed."
+  with the given records. Returns a Promise which resolves when the
+  transaction is completed."
   [idb [name records]]
   (js/Promise.
    (fn [resolve]
@@ -111,6 +145,12 @@
            (doseq [record records]
              (.put st record))
            (.commit tx)))))))
+
+(defn ^:private replace-known-stores [idb db]
+  (js/Promise.all
+   (.map backup-stores
+         (fn [store]
+           (replace-store idb #js [store (or (aget db store) #js [])])))))
 
 (defui ^:private listeners []
   (let [req (uix/use-context context)]
@@ -133,6 +173,7 @@
        (fn []
          (js-await [idb req]
            (-> (marshal idb)
+               (.then wrap-backup)
                (.then MessagePack/encode)
                (.then (fn [bytes] (js/Blob. #js [bytes] #js {"type" "application/octet-stream"})))
                (.then (fn [bytes] (download bytes "ogres.app.backup")))))) [req]))
@@ -144,8 +185,14 @@
        (fn [file]
          (js-await [idb req]
            (-> (MessagePack/decodeAsync (.stream file))
-               (.then unmarshal)
-               (.then (fn [db] (js/Promise.all (.map (js/Object.entries db) (fn [store] (replace-store idb store))))))
+               (.then normalize-backup)
+               (.then
+                (fn [backup]
+                  (let [stores (aget backup "stores")
+                        local-settings (aget backup "localSettings")]
+                    (-> (unmarshal stores)
+                        (.then (fn [db] (replace-known-stores idb db)))
+                        (.then (fn [] (restore-local-settings! local-settings)))))))
                (.then (fn [] (.. js/window -location reload)))
                (.catch js/console.error)))) [req]))))
 

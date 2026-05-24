@@ -64,10 +64,19 @@
           text))
       (when (seq image-url)
         ($ :figure.narration-entry-figure
+          {:style {:max-width "100%"
+                   :overflow "hidden"}}
           ($ :img.narration-entry-image
             {:src image-url
              :alt (or image-alt "Generated narration art")
-             :loading "lazy"}))))))
+             :loading "lazy"
+             :style {:display "block"
+                     :max-width "100%"
+                     :width "auto"
+                     :height "auto"
+                     :max-height "280px"
+                     :object-fit "contain"
+                     :margin "0 auto"}}))))))
 
 (defui ^:memo panel []
   (let [result     (hooks/use-query query [:db/ident :root])

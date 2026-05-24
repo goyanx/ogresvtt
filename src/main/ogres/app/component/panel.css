@@ -286,6 +286,8 @@
 
 .narration-entry-figure {
   margin: 6px 0 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .narration-entry-image {
@@ -293,5 +295,8 @@
   border: 1px solid var(--color-black-300);
   display: block;
   height: auto;
+  max-height: min(38vh, 320px);
   max-width: 100%;
+  object-fit: contain;
+  width: 100%;
 }

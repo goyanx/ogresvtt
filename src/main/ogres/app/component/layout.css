@@ -1,4 +1,5 @@
 .layout {
+  --panel-side-width: 640px;
   box-sizing: border-box;
   column-gap: 8px;
   display: grid;
@@ -26,6 +27,10 @@
 
 .layout-panel {
   grid-area: side;
+}
+
+.layout-resizer {
+  display: none;
 }
 
 .layout-scene {
@@ -162,7 +167,7 @@
 
 @media /* Landscape */ (min-aspect-ratio: 1 / 1) or (aspect-ratio: 1 / 1) {
   .layout {
-    grid-template-columns: 1fr 420px;
+    grid-template-columns: 1fr var(--panel-side-width);
     grid-template-rows: 32px 1fr;
     grid-template-areas:
       "scenes side"
@@ -191,4 +196,45 @@
       }
     }
   }
+
+  .layout-resizer {
+    align-self: stretch;
+    background: transparent;
+    border: none;
+    cursor: col-resize !important;
+    display: block;
+    grid-area: side;
+    justify-self: start;
+    margin-left: -12px;
+    outline: none;
+    padding: 0;
+    position: relative;
+    width: 18px;
+    z-index: 50;
+    touch-action: none;
+
+    &::after {
+      background-color: rgba(21, 33, 51, 0.55);
+      border-radius: 2px;
+      content: "";
+      inset: 0 auto 0 8px;
+      position: absolute;
+      width: 2px;
+    }
+
+    &:hover::after,
+    &:focus-visible::after {
+      background-color: rgba(21, 33, 51, 0.9);
+    }
+  }
+
+  .layout[data-expanded="false"] .layout-resizer {
+    display: none;
+  }
+}
+
+body.layout-resizing {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
 }
