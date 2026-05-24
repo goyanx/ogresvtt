@@ -54,7 +54,9 @@
   "Sends a ComfyUI workflow request via the LangGraph sidecar.
    Returns a js/Promise resolving to {:prompt_id :image_count :images}."
   [{:keys [endpoint comfy-endpoint workflow client-id poll-interval timeout-secs
-           prompt-text prompt-style prompt-model-family llm-backend llm-endpoint llm-model]}]
+           prompt-text prompt-style prompt-model-family llm-backend llm-endpoint llm-model
+           comfy-steps comfy-width comfy-height comfy-batch-size comfy-cfg
+           comfy-sampler-name comfy-scheduler]}]
   (let [url  (str endpoint "/dm/comfy/generate")
         api-key (.getItem js/localStorage "ai-dm-api-key")
         body (clj->js {:workflow      workflow
@@ -68,7 +70,14 @@
                        :llm_backend   (or llm-backend "")
                        :llm_endpoint  (or llm-endpoint "")
                        :llm_model     (or llm-model "")
-                       :api_key       (or api-key "")})]
+                       :api_key       (or api-key "")
+                       :comfy_steps   comfy-steps
+                       :comfy_width   comfy-width
+                       :comfy_height  comfy-height
+                       :comfy_batch_size comfy-batch-size
+                       :comfy_cfg     comfy-cfg
+                       :comfy_sampler_name (or comfy-sampler-name "")
+                       :comfy_scheduler (or comfy-scheduler "")})]
     (-> (js/fetch url
           #js {:method  "POST"
                :headers #js {"Content-Type" "application/json"}

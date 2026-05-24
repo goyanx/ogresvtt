@@ -34,7 +34,15 @@
    :voice-speed   0.95
    :comfy-enabled false
    :comfy-endpoint "http://127.0.0.1:8188"
-   :comfy-workflow ""})
+   :comfy-workflow ""
+   ;; 12GB VRAM-oriented defaults (fast Flux-like settings).
+   :comfy-steps 16
+   :comfy-width 832
+   :comfy-height 512
+   :comfy-batch-size 1
+   :comfy-cfg 3.2
+   :comfy-sampler-name "euler"
+   :comfy-scheduler "normal"})
 
 (defn load-config
   "Loads AI DM configuration from localStorage, merging with defaults."
@@ -65,6 +73,25 @@
 
 (def context (uix/create-context))
 
+(def ^:private cleanup-images-key
+  "ai-dm-cleanup-generated-images-v1")
+
+(defn ^:private cleanup-generated-images-once!
+  "One-time cleanup requested by user: remove up to 3 generated image-only narration entries."
+  [conn]
+  (when-not (.getItem js/localStorage cleanup-images-key)
+    (let [entries (-> (ds/entity @conn [:db/ident :root]) :root/narration)
+          images  (->> (or entries [])
+                       (filter (fn [e]
+                                 (seq (some-> (:narration/image-url e) str/trim))))
+                       (sort-by :narration/timestamp >)
+                       (take 3)
+                       (map :db/id)
+                       (into []))]
+      (when (seq images)
+        (ds/transact! conn (mapv (fn [id] [:db/retractEntity id]) images)))
+      (.setItem js/localStorage cleanup-images-key "1"))))
+
 (defn ^:private latest-chat-ui-message
   "Returns the most recent chat UI message from :root/chat-messages, if any."
   [db]
@@ -86,17 +113,6 @@
         turn-token (:initiative/turn scene)
         flags      (set (or (:token/flags turn-token) #{}))]
     (contains? flags :player)))
-
-(defn ^:private latest-visible-narration-text
-  "Returns the latest visible narration text to use as image prompt seed."
-  [db]
-  (let [entries (-> (ds/entity db [:db/ident :root]) :root/narration)
-        sorted  (sort-by :narration/timestamp (or entries []))]
-    (some (fn [entry]
-            (when (narration/visible-entry? entry)
-              (let [text (some-> (:narration/text entry) str/trim)]
-                (when (seq text) text))))
-          (reverse sorted))))
 
 ;; ---------------------------------------------------------------------------
 ;; LLM call
@@ -127,7 +143,7 @@
 
 (defn run-turn!
   "Executes a single AI DM turn: serialize state, call LLM, dispatch tool calls."
-  [conn dispatch config history set-history set-pending last-chat-ts set-last-chat-ts]
+  [conn dispatch config history set-history set-pending last-chat-ts set-last-chat-ts on-ai-narration]
   (set-pending true)
   (let [db          @conn
         game-state  (prompt/serialize-game-state db)
@@ -166,7 +182,13 @@
                                  (voice/speak! text
                                    {:sidecar-url (:lg-endpoint config)
                                     :voice       (:voice-id config)
-                                    :speed       (:voice-speed config)})))]
+                                    :speed       (:voice-speed config)})))
+                  emit-ai-narration! (fn [text]
+                                       (when (narration/narration-text-visible? text)
+                                         (dispatch :narration/append text "ai")
+                                         (speak! text)
+                                         (when on-ai-narration
+                                           (on-ai-narration text))))]
               (when (and (seq validation-errors)
                          (= (:backend config) :langgraph))
                 (dispatch :narration/append
@@ -176,12 +198,12 @@
               (when (and (empty? tool-calls)
                          (not (seq validation-errors))
                          (narration/narration-text-visible? content))
-                (dispatch :narration/append content "ai")
-                (speak! content))
+                (emit-ai-narration! content))
               (when (and (seq tool-calls)
                          (not (seq validation-errors)))
                 (let [results (tool-dispatch/dispatch-tool-calls dispatch db tool-calls
-                                {:on-narrate speak!})
+                                {:on-narrate speak!
+                                 :on-ai-narration on-ai-narration})
                       failures (seq (filter (comp not :ok) results))]
                   (when failures
                     (js/console.warn "AI DM tool dispatch failures:" (clj->js failures))
@@ -215,9 +237,9 @@
         dispatch                  (hooks/use-dispatch)
         [config set-config]       (uix/use-state load-config)
         [pending set-pending]     (uix/use-state false)
-        [image-pending set-image-pending] (uix/use-state false)
         [history set-history]     (uix/use-state [])
         [last-chat-ts set-last-chat-ts] (uix/use-state nil)
+        image-chain-ref           (uix/use-ref (js/Promise.resolve nil))
 
         update-config
         (uix/use-callback
@@ -228,13 +250,64 @@
                   (save-config! next)
                   next)))) [])
 
+        auto-generate-image
+        (uix/use-callback
+          (fn [narration-text]
+            (when (and (:comfy-enabled config)
+                       (= :langgraph (:backend config))
+                       (narration/narration-text-visible? narration-text))
+              (let [workflow-src (some-> (:comfy-workflow config) str/trim)]
+                (when (seq workflow-src)
+                  (try
+                    (let [workflow (js->clj (js/JSON.parse workflow-src))
+                          seed     (some-> narration-text str/trim)
+                          next-job
+                          (-> (or (.-current image-chain-ref) (js/Promise.resolve nil))
+                              (.catch (fn [_] nil))
+                              (.then
+                                (fn []
+                                  (langgraph/comfy-generate
+                                    {:endpoint       (:lg-endpoint config)
+                                     :comfy-endpoint (:comfy-endpoint config)
+                                     :workflow       workflow
+                                     :prompt-text    seed
+                                     :prompt-style   (:scenario config)
+                                     :prompt-model-family "flux"
+                                     :llm-backend    (name (or (:lg-backend config) :ollama))
+                                     :llm-endpoint   (:endpoint config)
+                                     :llm-model      (:model config)
+                                     :comfy-steps    (:comfy-steps config)
+                                     :comfy-width    (:comfy-width config)
+                                     :comfy-height   (:comfy-height config)
+                                     :comfy-batch-size (:comfy-batch-size config)
+                                     :comfy-cfg      (:comfy-cfg config)
+                                     :comfy-sampler-name (:comfy-sampler-name config)
+                                     :comfy-scheduler (:comfy-scheduler config)})))
+                              (.then
+                                (fn [resp]
+                                  (let [images (:images resp)
+                                        positive-prompt (:positive_prompt resp)]
+                                    (doseq [img (or images [])]
+                                      (dispatch :narration/append
+                                        ""
+                                        "ai"
+                                        {:image-url (:view_url img)
+                                         :image-alt (or positive-prompt (:filename img))})))))
+                              (.catch
+                                (fn [err]
+                                  (js/console.error "Auto Comfy generation failed:" err))))]
+                      (set! (.-current image-chain-ref) next-job))
+                    (catch :default err
+                      (js/console.error "Invalid Comfy workflow JSON:" err)))))))
+          [config dispatch])
+
         trigger-turn
         (uix/use-callback
           (fn []
             (when-not pending
               (run-turn! conn dispatch config history set-history set-pending
-                         last-chat-ts set-last-chat-ts)))
-          [conn dispatch config history pending last-chat-ts])
+                         last-chat-ts set-last-chat-ts auto-generate-image)))
+          [conn dispatch config history pending last-chat-ts auto-generate-image])
 
         send-message
         (uix/use-callback
@@ -245,72 +318,8 @@
                       history' (vec (take-last 20 (conj history user-msg)))]
                   (set-history history')
                   (run-turn! conn dispatch config history' set-history set-pending
-                             last-chat-ts set-last-chat-ts))))
-          [conn dispatch config history pending last-chat-ts])
-
-        generate-image
-        (uix/use-callback
-          (fn [caption]
-            (when-not image-pending
-              (if-not (:comfy-enabled config)
-                (dispatch :narration/append
-                  "[AI DM] Narration image generation is disabled in AI DM settings."
-                  "system")
-                (if (not= (:backend config) :langgraph)
-                (dispatch :narration/append
-                  "[AI DM] Image generation requires the LangGraph sidecar backend."
-                  "system")
-                (let [workflow-src (some-> (:comfy-workflow config) str/trim)]
-                  (if (empty? workflow-src)
-                    (dispatch :narration/append
-                      "[AI DM] Add a Comfy workflow JSON in AI Dungeon Master settings first."
-                      "system")
-                    (try
-                      (let [workflow (js->clj (js/JSON.parse workflow-src))
-                            caption  (some-> caption str/trim)
-                            seed     (or caption
-                                         (latest-visible-narration-text @conn)
-                                         "fantasy tabletop scene")]
-                        (set-image-pending true)
-                        (-> (langgraph/comfy-generate
-                              {:endpoint       (:lg-endpoint config)
-                               :comfy-endpoint (:comfy-endpoint config)
-                               :workflow       workflow
-                               :prompt-text    seed
-                               :prompt-style   (:scenario config)
-                               :prompt-model-family "flux"
-                               :llm-backend    (name (or (:lg-backend config) :ollama))
-                               :llm-endpoint   (:endpoint config)
-                               :llm-model      (:model config)})
-                            (.then
-                              (fn [resp]
-                                (let [images (:images resp)
-                                      positive-prompt (:positive_prompt resp)]
-                                  (if (seq images)
-                                    (doseq [img images]
-                                      (dispatch :narration/append
-                                        (or caption
-                                            (str "Generated image: " (:filename img)))
-                                        "ai"
-                                        {:image-url (:view_url img)
-                                         :image-alt (or caption positive-prompt (:filename img))}))
-                                    (dispatch :narration/append
-                                      "[AI DM] ComfyUI finished but returned no images."
-                                      "system")))))
-                            (.catch
-                              (fn [err]
-                                (js/console.error "Comfy generation failed:" err)
-                                (dispatch :narration/append
-                                  (str "[AI DM Image Error] " (.-message err))
-                                  "system")))
-                            (.finally
-                              (fn [] (set-image-pending false)))))
-                      (catch :default err
-                        (js/console.error "Invalid Comfy workflow JSON:" err)
-                        (dispatch :narration/append
-                          (str "[AI DM] Invalid Comfy workflow JSON: " (.-message err))
-                          "system")))))))))
-          [conn config dispatch image-pending])
+                             last-chat-ts set-last-chat-ts auto-generate-image))))
+          [conn dispatch config history pending last-chat-ts auto-generate-image])
 
         ctx-value
         (uix/use-memo
@@ -318,13 +327,17 @@
             {:config        config
              :update-config update-config
              :pending       pending
-             :image-pending image-pending
              :history       history
              :trigger-turn  trigger-turn
              :send-message  send-message
-             :generate-image generate-image
              :clear-history #(set-history [])})
-          [config update-config pending image-pending history trigger-turn send-message generate-image])]
+          [config update-config pending history trigger-turn send-message])]
+
+    ;; One-time targeted cleanup of previously generated image entries.
+    (uix/use-effect
+      (fn []
+        (cleanup-generated-images-once! conn))
+      [conn])
 
     ;; Auto-run timer
     (uix/use-effect

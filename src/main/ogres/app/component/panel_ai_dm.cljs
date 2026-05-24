@@ -12,6 +12,32 @@
     ($ :span.ai-dm-field-label label)
     children))
 
+(defn ^:private parse-int-safe [value fallback]
+  (let [n (js/parseInt value)]
+    (if (js/isNaN n) fallback n)))
+
+(defn ^:private parse-float-safe [value fallback]
+  (let [n (js/parseFloat value)]
+    (if (js/isNaN n) fallback n)))
+
+(def ^:private comfy-preset-12gb-fast
+  {:comfy-steps 16
+   :comfy-width 832
+   :comfy-height 512
+   :comfy-batch-size 1
+   :comfy-cfg 3.2
+   :comfy-sampler-name "euler"
+   :comfy-scheduler "normal"})
+
+(def ^:private comfy-preset-12gb-quality
+  {:comfy-steps 24
+   :comfy-width 1024
+   :comfy-height 576
+   :comfy-batch-size 1
+   :comfy-cfg 3.8
+   :comfy-sampler-name "euler"
+   :comfy-scheduler "normal"})
+
 (defui ^:memo panel []
   (let [result (hooks/use-query query)
         {:keys [user/host]} result
@@ -20,7 +46,9 @@
     (if (and host (some? ctx))
       (let [{:keys [config update-config pending trigger-turn clear-history]} ctx
             {:keys [enabled backend lg-backend endpoint model scenario auto-approve interval-ms
-                    voice-enabled voice-id voice-speed comfy-enabled comfy-endpoint comfy-workflow]} config]
+                    voice-enabled voice-id voice-speed comfy-enabled comfy-endpoint comfy-workflow
+                    comfy-steps comfy-width comfy-height comfy-batch-size comfy-cfg
+                    comfy-sampler-name comfy-scheduler]} config]
         ($ :.ai-dm
           ($ :header
             ($ :h2 "AI Dungeon Master")
@@ -100,6 +128,88 @@
                    :placeholder "http://127.0.0.1:8188"
                    :on-change #(update-config
                                  (fn [c] (assoc c :comfy-endpoint (.. % -target -value))))}))
+
+              ($ field-row {:label "Comfy preset"}
+                ($ :div {:style {:display "flex" :gap "6px"}}
+                  ($ :button.button.button-neutral
+                    {:type "button"
+                     :on-click #(update-config comfy-preset-12gb-fast)}
+                    "12GB Fast")
+                  ($ :button.button.button-neutral
+                    {:type "button"
+                     :on-click #(update-config comfy-preset-12gb-quality)}
+                    "12GB Quality")))
+
+              ($ field-row {:label "Comfy steps"}
+                ($ :input.text
+                  {:type "number"
+                   :min 4
+                   :max 80
+                   :value (or comfy-steps 16)
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-steps
+                                           (parse-int-safe (.. % -target -value) (or (:comfy-steps c) 16)) )))}))
+
+              ($ field-row {:label "Comfy width"}
+                ($ :input.text
+                  {:type "number"
+                   :min 256
+                   :max 2048
+                   :step 64
+                   :value (or comfy-width 832)
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-width
+                                           (parse-int-safe (.. % -target -value) (or (:comfy-width c) 832)) )))}))
+
+              ($ field-row {:label "Comfy height"}
+                ($ :input.text
+                  {:type "number"
+                   :min 256
+                   :max 2048
+                   :step 64
+                   :value (or comfy-height 512)
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-height
+                                           (parse-int-safe (.. % -target -value) (or (:comfy-height c) 512)) )))}))
+
+              ($ field-row {:label "Comfy batch size"}
+                ($ :input.text
+                  {:type "number"
+                   :min 1
+                   :max 4
+                   :value (or comfy-batch-size 1)
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-batch-size
+                                           (parse-int-safe (.. % -target -value) (or (:comfy-batch-size c) 1)) )))}))
+
+              ($ field-row {:label "Comfy CFG"}
+                ($ :input.text
+                  {:type "number"
+                   :min 1
+                   :max 20
+                   :step 0.1
+                   :value (or comfy-cfg 3.2)
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-cfg
+                                           (parse-float-safe (.. % -target -value) (or (:comfy-cfg c) 3.2)) )))}))
+
+              ($ field-row {:label "Comfy sampler"}
+                ($ :input.text
+                  {:type "text"
+                   :value (or comfy-sampler-name "euler")
+                   :placeholder "euler"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-sampler-name
+                                           (.. % -target -value))))}))
+
+              ($ field-row {:label "Comfy scheduler"}
+                ($ :input.text
+                  {:type "text"
+                   :value (or comfy-scheduler "normal")
+                   :placeholder "normal"
+                   :on-change #(update-config
+                                 (fn [c] (assoc c :comfy-scheduler
+                                           (.. % -target -value))))}))
 
               ;; ComfyUI workflow graph JSON (used by DM Narration Generate art action)
               ($ field-row {:label "Comfy workflow JSON"}
@@ -189,7 +299,7 @@
             ;; Interval
             ($ field-row {:label (str "Turn interval (" (/ interval-ms 1000) "s)")}
               ($ :input {:type "range"
-                         :min 5000 :max 120000 :step 5000
+                         :min 5000 :max 600000 :step 5000
                          :value interval-ms
                          :on-change #(update-config
                                        (fn [c] (assoc c :interval-ms
@@ -199,7 +309,7 @@
             (case backend
               :ollama    "Ensure Ollama is running with OLLAMA_ORIGINS=* for CORS support."
               :grok      "Your API key is stored in this browser only and never sent to the OgresVTT server."
-              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload. In Grok mode, leave Model blank to use .env.local defaults. Turn on narration images, configure Comfy workflow JSON, then use Generate art in DM Narration. A LangGraph prompt agent rewrites narration into model-friendly Comfy prompts."
+              :langgraph "Start the sidecar: uvicorn ai_dm.main:app --port 8765 --reload. In Grok mode, leave Model blank to use .env.local defaults. Turn on narration images and configure Comfy workflow JSON. Images are generated automatically after AI DM narration using a LangGraph prompt-transform node. Default Comfy tuning targets 12GB VRAM (16 steps, 832x512, batch 1)."
               ""))))
       ;; Non-host or context not available
       ($ :.ai-dm

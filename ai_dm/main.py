@@ -252,6 +252,77 @@ def _inject_prompts_heuristic(workflow: dict, positive: str, negative: str):
     return workflow, changed
 
 
+def _clamp_int(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, int(value)))
+
+
+def _clamp_float(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, float(value)))
+
+
+def _apply_comfy_perf_overrides(
+    workflow: dict,
+    *,
+    steps: int,
+    width: int,
+    height: int,
+    batch_size: int,
+    cfg: float,
+    sampler_name: str,
+    scheduler: str,
+) -> dict:
+    if not isinstance(workflow, dict):
+        return workflow
+
+    steps = _clamp_int(steps, 4, 80)
+    width = _clamp_int(width, 256, 2048)
+    height = _clamp_int(height, 256, 2048)
+    # Most latent/image models prefer dimensions divisible by 64.
+    width -= (width % 64)
+    height -= (height % 64)
+    batch_size = _clamp_int(batch_size, 1, 4)
+    cfg = _clamp_float(cfg, 1.0, 20.0)
+
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        class_type = str(node.get("class_type", "")).lower()
+
+        # Generic overrides when fields exist.
+        if "steps" in inputs:
+            inputs["steps"] = steps
+        if "cfg" in inputs:
+            inputs["cfg"] = cfg
+        if "sampler_name" in inputs and sampler_name:
+            inputs["sampler_name"] = sampler_name
+        if "scheduler" in inputs and scheduler:
+            inputs["scheduler"] = scheduler
+        if "width" in inputs:
+            inputs["width"] = width
+        if "height" in inputs:
+            inputs["height"] = height
+        if "batch_size" in inputs:
+            inputs["batch_size"] = batch_size
+
+        # Node-specific sensible defaults.
+        if "ksampler" in class_type:
+            inputs.setdefault("steps", steps)
+            inputs.setdefault("cfg", cfg)
+            if sampler_name:
+                inputs.setdefault("sampler_name", sampler_name)
+            if scheduler:
+                inputs.setdefault("scheduler", scheduler)
+        if "latent" in class_type and "empty" in class_type:
+            inputs.setdefault("width", width)
+            inputs.setdefault("height", height)
+            inputs.setdefault("batch_size", batch_size)
+
+    return workflow
+
+
 _load_env_files()
 log_path = configure_logging()
 logger = logging.getLogger("ai_dm.main")
@@ -276,6 +347,13 @@ DEFAULT_COMFY_TIMEOUT_SECS = int(_env_first("COMFY_TIMEOUT_SECS", default="240")
 DEFAULT_COMFY_MODEL_FAMILY = _env_first(
     "AI_DM_COMFY_MODEL_FAMILY", default="flux"
 ).strip().lower()
+DEFAULT_COMFY_STEPS = int(_env_first("AI_DM_COMFY_STEPS", default="16"))
+DEFAULT_COMFY_WIDTH = int(_env_first("AI_DM_COMFY_WIDTH", default="832"))
+DEFAULT_COMFY_HEIGHT = int(_env_first("AI_DM_COMFY_HEIGHT", default="512"))
+DEFAULT_COMFY_BATCH_SIZE = int(_env_first("AI_DM_COMFY_BATCH_SIZE", default="1"))
+DEFAULT_COMFY_CFG = float(_env_first("AI_DM_COMFY_CFG", default="3.2"))
+DEFAULT_COMFY_SAMPLER = _env_first("AI_DM_COMFY_SAMPLER", default="euler")
+DEFAULT_COMFY_SCHEDULER = _env_first("AI_DM_COMFY_SCHEDULER", default="normal")
 
 app = FastAPI(title="AI DM LangGraph Sidecar")
 
@@ -454,6 +532,13 @@ class ComfyGenerateRequest(BaseModel):
     llm_endpoint: str = ""
     llm_model: str = ""
     api_key: str = ""
+    comfy_steps: int | None = None
+    comfy_width: int | None = None
+    comfy_height: int | None = None
+    comfy_batch_size: int | None = None
+    comfy_cfg: float | None = None
+    comfy_sampler_name: str = ""
+    comfy_scheduler: str = ""
 
 
 class ComfyImage(BaseModel):
@@ -484,6 +569,15 @@ async def dm_comfy_generate(req: ComfyGenerateRequest):
     source_prompt = (req.prompt_text or "").strip()
     style_hint = (req.prompt_style or "").strip()
     model_family = (req.prompt_model_family or DEFAULT_COMFY_MODEL_FAMILY or "flux").strip().lower()
+    comfy_steps = req.comfy_steps if req.comfy_steps is not None else DEFAULT_COMFY_STEPS
+    comfy_width = req.comfy_width if req.comfy_width is not None else DEFAULT_COMFY_WIDTH
+    comfy_height = req.comfy_height if req.comfy_height is not None else DEFAULT_COMFY_HEIGHT
+    comfy_batch_size = (
+        req.comfy_batch_size if req.comfy_batch_size is not None else DEFAULT_COMFY_BATCH_SIZE
+    )
+    comfy_cfg = req.comfy_cfg if req.comfy_cfg is not None else DEFAULT_COMFY_CFG
+    comfy_sampler_name = (req.comfy_sampler_name or DEFAULT_COMFY_SAMPLER).strip()
+    comfy_scheduler = (req.comfy_scheduler or DEFAULT_COMFY_SCHEDULER).strip()
     positive_prompt = source_prompt
     negative_prompt = ""
 
@@ -512,7 +606,13 @@ async def dm_comfy_generate(req: ComfyGenerateRequest):
         positive_prompt = (transformed.get("positive_prompt") or source_prompt).strip()
         negative_prompt = (transformed.get("negative_prompt") or "").strip()
     if not positive_prompt:
-        positive_prompt = "fantasy tabletop scene, cinematic lighting, detailed environment"
+        positive_prompt = (
+            "safe-for-work fantasy adventure scene, heroic party, cinematic lighting, detailed environment"
+        )
+    if not negative_prompt:
+        negative_prompt = (
+            "nsfw, nudity, explicit sexual content, fetish, gore, graphic violence, text, watermark, logo"
+        )
 
     # Apply transformed prompts to workflow:
     # 1) token placeholders if present, else 2) heuristic assignment.
@@ -523,14 +623,31 @@ async def dm_comfy_generate(req: ComfyGenerateRequest):
         workflow_prompt, _ = _inject_prompts_heuristic(
             workflow_prompt, positive_prompt, negative_prompt
         )
+    workflow_prompt = _apply_comfy_perf_overrides(
+        workflow_prompt,
+        steps=comfy_steps,
+        width=comfy_width,
+        height=comfy_height,
+        batch_size=comfy_batch_size,
+        cfg=comfy_cfg,
+        sampler_name=comfy_sampler_name,
+        scheduler=comfy_scheduler,
+    )
 
     logger.info(
-        "dm_comfy_generate start comfy_base_url=%s client_id=%s timeout_secs=%s poll_interval=%s source_prompt_chars=%s",
+        "dm_comfy_generate start comfy_base_url=%s client_id=%s timeout_secs=%s poll_interval=%s source_prompt_chars=%s steps=%s size=%sx%s batch=%s cfg=%s sampler=%s scheduler=%s",
         comfy_base_url,
         client_id,
         timeout_secs,
         poll_interval,
         len(source_prompt),
+        comfy_steps,
+        comfy_width,
+        comfy_height,
+        comfy_batch_size,
+        comfy_cfg,
+        comfy_sampler_name,
+        comfy_scheduler,
     )
 
     timeout = httpx.Timeout(timeout_secs)
@@ -630,6 +747,13 @@ def health():
             "grok_model": DEFAULT_GROK_MODEL,
             "comfy_base_url": DEFAULT_COMFY_BASE_URL,
             "comfy_model_family": DEFAULT_COMFY_MODEL_FAMILY,
+            "comfy_steps": DEFAULT_COMFY_STEPS,
+            "comfy_width": DEFAULT_COMFY_WIDTH,
+            "comfy_height": DEFAULT_COMFY_HEIGHT,
+            "comfy_batch_size": DEFAULT_COMFY_BATCH_SIZE,
+            "comfy_cfg": DEFAULT_COMFY_CFG,
+            "comfy_sampler_name": DEFAULT_COMFY_SAMPLER,
+            "comfy_scheduler": DEFAULT_COMFY_SCHEDULER,
         },
         "db": {
             "path": str(resolve_db_path()),

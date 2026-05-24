@@ -68,10 +68,12 @@
   {:ok true :note "map switch/show request dispatched"})
 
 (defmethod dispatch-tool "narrate"
-  [dispatch _db _ {:keys [text]} {:keys [on-narrate]}]
+  [dispatch _db _ {:keys [text]} {:keys [on-narrate on-ai-narration]}]
   (when (narration/narration-text-visible? text)
     (dispatch :narration/append text "ai")
     (when on-narrate (on-narrate text)))
+  (when (and on-ai-narration (narration/narration-text-visible? text))
+    (on-ai-narration text))
   {:ok true})
 
 (defmethod dispatch-tool "move_player_token"

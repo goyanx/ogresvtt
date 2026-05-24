@@ -110,12 +110,8 @@
         host       (:user/host result)
         ai-ctx     (uix/use-context ai/context)
         ai-enabled (and (some? ai-ctx) (:enabled (:config ai-ctx)))
-        comfy-enabled (and ai-enabled (:comfy-enabled (:config ai-ctx)))
-        langgraph? (and ai-enabled (= :langgraph (:backend (:config ai-ctx))))
         pending    (and (some? ai-ctx) (:pending ai-ctx))
-        image-pending (and (some? ai-ctx) (:image-pending ai-ctx))
-        [text set-text] (uix/use-state "")
-        [image-caption set-image-caption] (uix/use-state "")]
+        [text set-text] (uix/use-state "")]
     (when host
       ($ :<>
         ($ :form.narration-form
@@ -136,35 +132,6 @@
           ($ :button.button.button-primary
             {:type "submit" :disabled (or (empty? text) pending)}
             (if ai-enabled "Ask" "Send")))
-        (when (and ai-enabled comfy-enabled)
-          ($ :form.narration-form
-            {:on-submit
-             (fn [e]
-               (.preventDefault e)
-               (when (and (fn? (:generate-image ai-ctx))
-                          langgraph?
-                          (not pending)
-                          (not image-pending))
-                 ((:generate-image ai-ctx) image-caption)))}
-            ($ :input.text
-              {:type "text"
-               :value image-caption
-               :placeholder (if langgraph?
-                              "Art prompt seed (optional)..."
-                              "Switch backend to LangGraph for ComfyUI")
-               :disabled (or pending image-pending (not langgraph?))
-               :on-change #(set-image-caption (.. % -target -value))})
-            ($ :button.button.button-neutral
-              {:type "submit"
-               :disabled (or pending image-pending (not langgraph?))}
-              (if image-pending "Rendering..." "Generate art"))))
-        (when (and ai-enabled (not comfy-enabled))
-          ($ :p
-            {:style {:fontSize "12px"
-                     :color "var(--color-black-500)"
-                     :margin "2px 0 4px"}}
-            "Enable narration images in the AI Dungeon Master panel to use Generate art."))
         ($ :button.button.button-neutral
-          {:disabled image-pending
-           :on-click #(dispatch :narration/clear)}
+          {:on-click #(dispatch :narration/clear)}
           "Clear")))))

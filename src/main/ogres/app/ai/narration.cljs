@@ -19,8 +19,13 @@
          (not (and (str/starts-with? s "{")
                    (str/ends-with? s "}"))))))
 
+(defn narration-image-visible?
+  [image-url]
+  (let [s (some-> image-url str/trim)]
+    (seq s)))
+
 (defn visible-entry?
   [entry]
   (and (visible-source? (:narration/source entry))
-       (narration-text-visible? (:narration/text entry))))
-
+       (or (narration-text-visible? (:narration/text entry))
+           (narration-image-visible? (:narration/image-url entry)))))

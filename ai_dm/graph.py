@@ -95,9 +95,12 @@ async def _transform_image_prompt(state: ImagePromptState, llm_call):
     system = (
         "You convert tabletop DM narration into an image-generation prompt for ComfyUI models. "
         "Respond as JSON only with keys: positive_prompt, negative_prompt. "
+        "The output must be strictly safe-for-work and adventure-oriented. "
+        "Never include nudity, sexual content, fetish content, or graphic gore. "
         "Keep positive_prompt concise but vivid (1-3 sentences), cinematic, and visually grounded. "
         "For FLUX, prefer natural language scene detail and avoid comma spam. "
-        "negative_prompt should contain short quality/safety negatives (no gore, no text watermark, no logo)."
+        "negative_prompt should contain short quality/safety negatives "
+        "(nsfw, nudity, explicit sexual content, gore, graphic violence, text watermark, logo)."
     )
     user = (
         f"Model family: {model_family}\n"
@@ -124,7 +127,14 @@ def _sanitize_image_prompt(state: ImagePromptState):
     positive = (state.get("positive_prompt") or "").strip()
     negative = (state.get("negative_prompt") or "").strip()
     if not positive:
-        positive = (state.get("source_prompt") or "fantasy tabletop scene").strip()
+        positive = (
+            state.get("source_prompt")
+            or "safe-for-work fantasy adventure scene, heroic party, cinematic lighting"
+        ).strip()
+    if not negative:
+        negative = (
+            "nsfw, nudity, explicit sexual content, fetish, gore, graphic violence, text, watermark, logo"
+        )
     # Keep payload compact for Comfy nodes.
     if len(positive) > 700:
         positive = positive[:700].rsplit(" ", 1)[0]
