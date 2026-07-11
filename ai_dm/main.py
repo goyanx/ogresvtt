@@ -36,7 +36,9 @@ import httpx
 from pydantic import BaseModel
 
 from ai_dm.backends import grok, ollama
+from ai_dm.character_context import build_character_context
 from ai_dm.db import get_conn, init_db, list_tables, resolve_db_path
+from ai_dm.ddb_import import extract_character_id, fetch_character, map_character, upsert_character
 from ai_dm.graph import build_graph, build_image_prompt_graph
 from ai_dm.logging_config import configure_logging
 
@@ -441,7 +443,13 @@ async def dm_turn(req: TurnRequest):
         "response_mode": "npc",
         "response_mode_reason": "",
         "latest_player_message": "",
+        "character_context": build_character_context(req.game_state or ""),
     }
+    if initial_state["character_context"]:
+        logger.info(
+            "dm_turn character_context chars=%s",
+            len(initial_state["character_context"]),
+        )
 
     try:
         final_state = await graph.ainvoke(initial_state)
@@ -474,6 +482,44 @@ async def dm_turn(req: TurnRequest):
         validation_errors=final_state["validation_errors"],
         retry_count=final_state["retry_count"],
     )
+
+
+# ---------------------------------------------------------------------------
+# /dm/import/ddb-character — D&D Beyond character import
+# ---------------------------------------------------------------------------
+
+class DdbImportRequest(BaseModel):
+    character: str  # numeric id or a dndbeyond.com character URL
+    is_player: bool = True
+
+
+@app.post("/dm/import/ddb-character")
+async def dm_import_ddb_character(req: DdbImportRequest):
+    character_id = extract_character_id(req.character)
+    if character_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a numeric D&D Beyond character id or a URL like "
+                   "https://www.dndbeyond.com/characters/12345678",
+        )
+    try:
+        data = await fetch_character(character_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"D&D Beyond returned {exc.response.status_code} for character "
+                   f"{character_id}. Set the character's privacy to Public on "
+                   "dndbeyond.com and try again.",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach D&D Beyond: {exc}")
+
+    if not data:
+        raise HTTPException(status_code=502, detail="Empty character payload from D&D Beyond.")
+
+    mapped = map_character(data, is_player=req.is_player)
+    summary = upsert_character(mapped)
+    return summary
 
 
 # ---------------------------------------------------------------------------

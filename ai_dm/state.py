@@ -15,3 +15,4 @@ class DMState(TypedDict):
     response_mode: str
     response_mode_reason: str
     latest_player_message: str
+    character_context: str

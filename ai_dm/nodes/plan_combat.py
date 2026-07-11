@@ -79,6 +79,11 @@ RESPONSE MODE:
 LATEST PLAYER MESSAGE:
 {latest_player_message}
 
+CHARACTER SHEETS (authoritative stats from the campaign database):
+{character_context}
+- Use these ability modifiers, HP, and resources for attacks, saves, and damage instead of inventing numbers.
+- Call get_character_sheet / get_monster_stats only for detail beyond this block.
+
 ASSESSMENT:
 {plan}
 
@@ -135,6 +140,7 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
         response_mode=response_mode,
         response_mode_instructions=_response_mode_instructions(response_mode),
         latest_player_message=state.get("latest_player_message") or "(none)",
+        character_context=state.get("character_context") or "(none on file)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],

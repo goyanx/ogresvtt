@@ -68,6 +68,8 @@
 - Two-way chat — ask the DM questions and get in-character responses
 - Table chat panel (💬) — player messages feed the AI DM as declared actions
 - Persistent token notes/attributes the DM reads every turn and can update itself
+- Character sheets from the campaign database (stats, HP, spell slots, gear) are auto-injected into every DM turn — party always, NPCs when their token is on the board
+- One-call D&D Beyond character import into the campaign database
 - Generated ambient soundscapes and one-shot sound effects the DM switches to match the scene (no audio files needed — everything is synthesized in the browser)
 - Voice narration via Kokoro TTS (British male narrator by default)
 - Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
@@ -348,7 +350,46 @@ See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin detail
 
 LangGraph DM can now emit `show_map` action tool calls to request scene/map switching in the client, backed by `map_scenes` config in SQLite.
 
-### 14) Import `marker-pdf` campaign output with Grok tool-calling
+### 14) Character sheets: the DM's per-turn memory
+
+The LangGraph DM no longer depends on choosing to call `get_character_sheet` —
+every turn, the sidecar builds a compact **CHARACTER SHEETS** block from the
+campaign database and injects it into the assess, plan, and combat prompts:
+
+- **Party members** (`camp_characters.is_player = 1`) are always included.
+- **NPCs/monsters** are included when a board token label matches their name
+  (initiative suffixes like "Goblin 2" are handled).
+- Each entry carries ability scores with modifiers, proficiency bonus,
+  passive Perception, speed, HP / temp HP / spell slots, active conditions,
+  and equipped gear — so checks, saves, attacks, and damage use real numbers.
+
+Populate the database via the D&D Beyond import below, the `marker-pdf`
+campaign importer (section 16), the `/dm-admin` console, or let the DM itself
+persist characters with `upsert_character` / `set_character_stats` during play.
+
+### 15) Import your D&D Beyond character
+
+Set your character's privacy to **Public** on dndbeyond.com, then (with the
+sidecar running):
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8765/dm/import/ddb-character `
+  -ContentType "application/json" `
+  -Body '{"character": "https://www.dndbeyond.com/characters/12345678"}'
+```
+
+You can pass the full URL or just the numeric id. Use `"is_player": false`
+to import a DM-controlled NPC. The import fills `camp_characters`,
+`camp_character_stats` (abilities with racial bonuses, proficiency bonus,
+passive Perception, speed), `camp_resources` (current/max/temp HP, spell
+slots), inventory, and currency. Appearance and personality traits land in
+the character's notes, which also feed narration and Comfy image-generation
+context. Re-importing the same character updates it in place.
+
+This uses D&D Beyond's public character JSON endpoint — no login or scraping;
+it only works for characters you've set to Public.
+
+### 16) Import `marker-pdf` campaign output with Grok tool-calling
 
 Use the standalone CLI importer to ingest `marker_single` output into SQLite RAG
 and campaign tables. This script is independent from sidecar runtime code

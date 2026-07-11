@@ -73,6 +73,11 @@ Narration guardrail (player-facing):
 - Never reveal DM-only map metadata, hidden trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map codes like N3/N6.
 - Do not mention internal IDs/keys/labels from the game state. Convert secret/internal context into sensory, in-world description only.
 
+CHARACTER SHEETS (authoritative stats from the campaign database):
+{character_context}
+- Use these stats for ability checks, saves, attacks, and HP instead of inventing numbers.
+- Call get_character_sheet only when you need detail beyond this block (full inventory, opinions, relationships).
+
 ASSESSMENT:
 {plan}
 
@@ -129,6 +134,7 @@ async def plan(state: DMState, llm_call) -> DMState:
         response_mode=response_mode,
         response_mode_instructions=_response_mode_instructions(response_mode),
         latest_player_message=state.get("latest_player_message") or "(none)",
+        character_context=state.get("character_context") or "(none on file)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],
