@@ -63,6 +63,7 @@ class ImagePromptState(TypedDict, total=False):
     source_prompt: str
     style_hint: str
     model_family: str
+    game_state: str
     positive_prompt: str
     negative_prompt: str
 
@@ -87,10 +88,40 @@ def _extract_json_object(text: str) -> dict:
         return {}
 
 
+def _extract_token_notes_context(game_state: str, max_rows: int = 12, max_chars: int = 1200) -> str:
+    text = game_state or ""
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    pattern = re.compile(
+        r'^\s*-\s*id:\s*(\d+),\s*label:\s*"([^"]*)".*?notes:\s*"([^"]*)"',
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    for match in pattern.finditer(text):
+        token_id = match.group(1).strip()
+        label = (match.group(2) or "Unknown").strip()
+        notes = (match.group(3) or "").strip()
+        if not notes:
+            continue
+        lines.append(f'- "{label}" (id {token_id}): {notes}')
+        if len(lines) >= max_rows:
+            break
+
+    if not lines:
+        return ""
+
+    summary = "\n".join(lines)
+    if len(summary) > max_chars:
+        summary = summary[:max_chars].rsplit(" ", 1)[0]
+    return summary
+
+
 async def _transform_image_prompt(state: ImagePromptState, llm_call):
     source_prompt = (state.get("source_prompt") or "").strip()
     style_hint = (state.get("style_hint") or "").strip()
     model_family = (state.get("model_family") or "flux").strip().lower()
+    token_notes_context = _extract_token_notes_context(state.get("game_state") or "")
 
     system = (
         "You convert tabletop DM narration into an image-generation prompt for ComfyUI models. "
@@ -106,6 +137,8 @@ async def _transform_image_prompt(state: ImagePromptState, llm_call):
         f"Model family: {model_family}\n"
         f"Style hint: {style_hint or '(none)'}\n"
         f"Source narration:\n{source_prompt}\n\n"
+        f"Token notes context (optional):\n{token_notes_context or '(none)'}\n\n"
+        "Use token notes only as supportive visual context; keep the primary scene grounded in source narration.\n\n"
         'Return JSON: {"positive_prompt":"...","negative_prompt":"..."}'
     )
     resp = await llm_call(

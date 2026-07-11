@@ -55,6 +55,7 @@
    Returns a js/Promise resolving to {:prompt_id :image_count :images}."
   [{:keys [endpoint comfy-endpoint workflow client-id poll-interval timeout-secs
            prompt-text prompt-style prompt-model-family llm-backend llm-endpoint llm-model
+           game-state
            comfy-steps comfy-width comfy-height comfy-batch-size comfy-cfg
            comfy-sampler-name comfy-scheduler]}]
   (let [url  (str endpoint "/dm/comfy/generate")
@@ -67,6 +68,7 @@
                        :prompt_text   (or prompt-text "")
                        :prompt_style  (or prompt-style "")
                        :prompt_model_family (or prompt-model-family "")
+                       :game_state    (or game-state "")
                        :llm_backend   (or llm-backend "")
                        :llm_endpoint  (or llm-endpoint "")
                        :llm_model     (or llm-model "")

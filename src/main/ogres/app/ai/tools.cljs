@@ -35,6 +35,30 @@
       :required ["scene_external_id"]}}}
    {:type "function"
     :function
+    {:name "set_ambience"
+     :description "Switch the looping ambient soundscape heard by the players. Use when the location or overall mood changes. Use 'battle' when combat starts and restore the scene mood when it ends. Use 'none' for silence."
+     :parameters
+     {:type "object"
+      :properties
+      {:mood {:type "string"
+              :enum ["none" "dungeon" "cave" "forest" "tavern" "battle" "storm" "mystic" "calm"]
+              :description "The ambient soundscape mood."}}
+      :required ["mood"]}}}
+   {:type "function"
+    :function
+    {:name "play_sound"
+     :description "Play a one-shot sound effect to punctuate an impactful moment (a hit, a spell, a door, a death). Use sparingly — at most one or two per turn."
+     :parameters
+     {:type "object"
+      :properties
+      {:effect {:type "string"
+                :enum ["sword_clash" "arrow_whoosh" "magic_cast" "fireball" "door_creak"
+                       "thunder" "monster_roar" "coins" "dice_roll" "heal" "victory_fanfare"
+                       "damage_hit" "death_knell"]
+                :description "The sound effect to play."}}
+      :required ["effect"]}}}
+   {:type "function"
+    :function
     {:name "narrate"
      :description "Emit narration text visible to all players. Call this once per turn."
      :parameters
@@ -74,6 +98,17 @@
       :properties
       {:token_id {:type "integer" :description "The entity ID of the token."}}
       :required ["token_id"]}}}
+   {:type "function"
+    :function
+    {:name "update_token_attribute"
+     :description "Update persistent token notes/attributes used by the DM for roleplay context, behavior, motives, or status not represented by HP/flags. Use mode 'append' to add a lasting fact without erasing existing notes."
+     :parameters
+     {:type "object"
+      :properties
+      {:token_id {:type "integer" :description "The entity ID of the token."}
+       :text {:type "string" :description "Token notes/attributes text. Empty string with mode 'replace' clears the notes."}
+       :mode {:type "string" :enum ["replace" "append"] :description "replace overwrites all notes; append adds text as a new line. Defaults to replace."}}
+      :required ["token_id" "text"]}}}
    {:type "function"
     :function
     {:name "update_hp"

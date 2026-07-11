@@ -17,6 +17,26 @@
 (def ^:private color-options
   ["blue" "yellow" "green" "purple" "orange"])
 
+(def ^:private loopback-hosts
+  #{"localhost" "127.0.0.1" "0.0.0.0" "::1" "[::1]"})
+
+(defn ^:private resolve-socket-url []
+  (let [loc       (.-location js/window)
+        ws-scheme (if (= "https:" (.-protocol loc)) "wss" "ws")
+        page-host (.-hostname loc)
+        page-base (str ws-scheme "://" (.-host loc) "/ws")
+        default-url (str "ws://" page-host ":5000/ws")
+        raw-url  (or SOCKET-URL default-url)]
+    (try
+      (let [url (js/URL. raw-url page-base)]
+        (if (contains? loopback-hosts (.-hostname url))
+          (do
+            (set! (.-hostname url) page-host)
+            (.toString url))
+          (.toString url)))
+      (catch :default _
+        default-url))))
+
 (defn ^:private next-color [data colors]
   (let [session (ds/entity data [:db/ident :session])
         conns   (:session/conns session)
@@ -147,6 +167,7 @@
   (let [[socket set-socket] (uix/use-state nil)
         dispatch (hooks/use-dispatch)
         publish  (hooks/use-publish)
+        socket-url (resolve-socket-url)
         images   (idb/use-reader "images")
         conn     (uix/use-context state/context)
         on-send-text
@@ -204,9 +225,9 @@
          (let [host (ds/entity @conn [:db/ident :user])
                conn (js/WebSocket.
                      (if (:session/last-room host)
-                       (str SOCKET-URL "?host=" (:session/last-room host))
-                       SOCKET-URL))]
-           (set-socket conn))) [conn]))
+                       (str socket-url "?host=" (:session/last-room host))
+                       socket-url))]
+           (set-socket conn))) [conn socket-url]))
 
     ;; Subscribe to requests to join the session, creating a WebSocket
     ;; connection object.
@@ -217,8 +238,8 @@
                params (js/URLSearchParams. search)
                room   (.get params "join")]
            (if (some? room)
-             (let [conn (js/WebSocket. (str SOCKET-URL "?join=" room))]
-               (set-socket conn))))) []))
+             (let [conn (js/WebSocket. (str socket-url "?join=" room))]
+               (set-socket conn))))) [socket-url]))
 
     ;; Subscribe to regular heartbeat events, rebroadcasting it to the other
     ;; connections in the server.

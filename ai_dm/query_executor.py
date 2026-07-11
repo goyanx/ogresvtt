@@ -368,6 +368,10 @@ def _parse_tokens(game_state: str) -> list[dict]:
             if flags:
                 token["flags"] = [f.strip() for f in flags.group(1).split(",")]
 
+            notes = re.search(r'notes:\s*"([^"]*)"', line)
+            if notes:
+                token["notes"] = notes.group(1)
+
             if "id" in token:
                 results.append(token)
         return results

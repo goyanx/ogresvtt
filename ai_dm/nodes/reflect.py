@@ -13,14 +13,27 @@ REFLECT_PROMPT = """Your previous tool calls had the following errors:
 Original game state for reference:
 {game_state}
 
+Response mode for this turn:
+{response_mode}
+Mode note: {response_mode_reason}
+Latest player message: {latest_player_message}
+
 Please correct the tool calls and try again. Only output valid tool calls.\nUse English only for any text fields.
 If narrate text was flagged for secrecy, rewrite it to avoid DM-only/internal map details (no region keys like N3/N6, no trigger notes, no internal labels/IDs).
+If response mode is dm, keep narrate text out-of-character and directly answer the player's request.
+If response mode is npc, keep narrate text in-world.
 """
 
 
 async def reflect(state: DMState, llm_call) -> DMState:
     errors_text = "\n".join(f"- {e}" for e in state["validation_errors"])
-    prompt = REFLECT_PROMPT.format(errors=errors_text, game_state=state["game_state"])
+    prompt = REFLECT_PROMPT.format(
+        errors=errors_text,
+        game_state=state["game_state"],
+        response_mode=state.get("response_mode", "npc"),
+        response_mode_reason=state.get("response_mode_reason", "(none)"),
+        latest_player_message=state.get("latest_player_message", "(none)"),
+    )
     messages = [{"role": "user", "content": prompt}]
     response = await llm_call(messages, tools=TOOL_DEFINITIONS)
     message = response["choices"][0]["message"]

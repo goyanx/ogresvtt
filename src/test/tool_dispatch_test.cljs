@@ -130,6 +130,46 @@
       (is (not (:ok r)))
       (is (zero? (count @log))))))
 
+(deftest update-token-attribute-tool
+  (testing "replace mode dispatches the raw text"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "update_token_attribute"
+                              {:token_id tid :text "Sworn to the crown"} {})]
+      (is (:ok r))
+      (is (= [[:token/change-meta [tid] "Sworn to the crown"]] @log))))
+  (testing "append mode merges with existing notes on a new line"
+    (let [[db0 tid] (build-scene)
+          db  (:db-after (ds/with db0 [{:db/id tid :token/meta "Cowardly"}]))
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "update_token_attribute"
+                              {:token_id tid :text "Fears fire" :mode "append"} {})]
+      (is (:ok r))
+      (is (= [[:token/change-meta [tid] "Cowardly\nFears fire"]] @log))))
+  (testing "append mode with no existing notes stores the text as-is"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "update_token_attribute"
+                              {:token_id tid :text "Fears fire" :mode "append"} {})]
+      (is (:ok r))
+      (is (= [[:token/change-meta [tid] "Fears fire"]] @log))))
+  (testing "text is truncated to the maximum length"
+    (let [[db tid] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          long-text (apply str (repeat 5000 "x"))
+          r (td/dispatch-tool dispatch db "update_token_attribute"
+                              {:token_id tid :text long-text} {})]
+      (is (:ok r))
+      (let [[_ _ value] (first @log)]
+        (is (= 4000 (count value))))))
+  (testing "unknown token fails without dispatching"
+    (let [[db _] (build-scene)
+          [log dispatch] (captured-dispatcher)
+          r (td/dispatch-tool dispatch db "update_token_attribute"
+                              {:token_id 999999 :text "nope"} {})]
+      (is (not (:ok r)))
+      (is (zero? (count @log))))))
+
 (deftest plan-path-tool
   (testing "returns waypoints when a path exists"
     (let [[db _] (build-scene)

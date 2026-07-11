@@ -13,12 +13,27 @@
   [:db/id
    :token/label
    :token/flags
+   :token/meta
    :token/size
    :token/light
    :object/point
    :initiative/roll
    :initiative/health
    :initiative/suffix])
+
+(def ^:private token-meta-max-len
+  280)
+
+(defn- token-meta-summary [t]
+  (when-let [raw (some-> (:token/meta t) str str/trim not-empty)]
+    (let [single-line (-> raw
+                          (str/replace #"\r?\n+" " | ")
+                          (str/replace #"\"" "'"))
+          cutoff      (> (count single-line) token-meta-max-len)
+          short       (if cutoff
+                        (subs single-line 0 token-meta-max-len)
+                        single-line)]
+      (if cutoff (str short "...") short))))
 
 (defn- initiative-order
   "Sort order used by the Initiative panel and turn advancement:
@@ -36,13 +51,15 @@
                          (collision/point-near-wall?
                           walls (.-x pt) (.-y pt) wall-distance))]
      (str "  - id: " (:db/id t)
-          ", label: \"" (or (:token/label t) "Unknown") "\""
-          (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
-          (when (:token/size t) (str ", size: " (:token/size t) "ft"))
-          (when (seq (:token/flags t))
-            (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
-          (when near-wall? ", near_wall: true")
-          "\n"))))
+           ", label: \"" (or (:token/label t) "Unknown") "\""
+           (when pt (str ", pos: (" (.-x pt) ", " (.-y pt) ")"))
+           (when (:token/size t) (str ", size: " (:token/size t) "ft"))
+           (when (seq (:token/flags t))
+             (str ", flags: [" (apply str (interpose ", " (map name (:token/flags t)))) "]"))
+           (when-let [meta (token-meta-summary t)]
+             (str ", notes: \"" meta "\""))
+           (when near-wall? ", near_wall: true")
+           "\n"))))
 
 (defn- player-token? [t]
   (contains? (set (:token/flags t)) :player))
@@ -262,9 +279,12 @@
    "- If the current_turn token is a player token and the latest player/host chat message declares an explicit action (e.g. cast, attack, dash, disengage), adjudicate that action with tools (roll_dice / resolve_attack_vs_ac / resolve_damage, then update_hp/apply_damage as needed) instead of narrating a no-op.\n"
    "- Do NOT use move_token on player-flagged tokens — use move_player_token instead.\n"
    "- Use move_player_token ONLY when a player explicitly states their character moves (e.g. 'I move north', 'I go east 2 squares', 'I run to the door'). Infer direction from their message.\n"
-   "- Do not move player tokens unless the player asked for it in this message.\n"
-   "- When any PC/NPC roll happens this turn, include the actual rolled number(s) in narration.\n"
-   "- Keep narration under 100 words per turn.\n"
+    "- Do not move player tokens unless the player asked for it in this message.\n"
+    "- When any PC/NPC roll happens this turn, include the actual rolled number(s) in narration.\n"
+    "- If lasting character facts change (alliance, fear, objective, oath, condition notes), persist them using update_token_attribute with mode 'append' so existing notes are kept; use mode 'replace' only to rewrite notes entirely.\n"
+    "- Set the soundscape with set_ambience when the location or overall mood changes (dungeon, cave, forest, tavern, battle, storm, mystic, calm). Switch to 'battle' when combat starts and restore the scene mood when it ends.\n"
+    "- Punctuate impactful moments with play_sound (e.g. sword_clash, magic_cast, monster_roar, door_creak, victory_fanfare, death_knell). At most one or two sounds per turn; do not repeat the same effect every turn.\n"
+    "- Keep narration under 100 words per turn.\n"
    "- Always respond in English only (narration, tool text, and reasoning). Never output Thai or any other language.\n"
    "- Position coordinates are in pixels. The grid cell size is " scene-grid-size "px (= 5 feet).\n"
    "- For proximity decisions, use the provided feet distances. A token is adjacent/melee only at 5ft or less.\n"

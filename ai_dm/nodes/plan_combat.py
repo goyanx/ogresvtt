@@ -30,6 +30,22 @@ def _env_int(name: str, default: int, minimum: int = 1, maximum: int = 20) -> in
 MAX_QUERY_ROUNDS = _env_int("AI_DM_MAX_QUERY_ROUNDS", default=4, minimum=1, maximum=20)
 
 
+def _response_mode_instructions(mode: str) -> str:
+    normalized = (mode or "").strip().lower()
+    if normalized == "dm":
+        return (
+            "- Response stance: DM mode (out-of-character facilitator).\n"
+            "- Use narrate text to answer the player's direct request clearly and factually.\n"
+            "- For inventory/spells/money/stats, prefer get_character_sheet before answering.\n"
+            "- For rules/mechanics, prefer retrieve_rules and/or get_rulings before answering.\n"
+            "- Do not force NPC dialogue voice in this mode."
+        )
+    return (
+        "- Response stance: NPC mode (in-world roleplay).\n"
+        "- Keep narrate text immersive and scene-grounded."
+    )
+
+
 COMBAT_PLAN_PROMPT = """You are the combat-resolution planner for an AI Dungeon Master.
 Produce legal, deterministic combat actions for the current turn.
 
@@ -55,6 +71,13 @@ Rules:
 - Never include internal IDs/keys/labels from game-state internals in narration.
 - Do not use the phrase "no action taken this turn" when a pending player-declared action can be resolved with available tools.
 - All output must be English only.
+
+RESPONSE MODE:
+{response_mode}
+{response_mode_instructions}
+
+LATEST PLAYER MESSAGE:
+{latest_player_message}
 
 ASSESSMENT:
 {plan}
@@ -107,7 +130,11 @@ def _narration_discloses_rolls(narration_text: str, roll_markers: list[set[str]]
 
 
 async def plan_combat(state: DMState, llm_call) -> DMState:
+    response_mode = state.get("response_mode", "npc")
     prompt = COMBAT_PLAN_PROMPT.format(
+        response_mode=response_mode,
+        response_mode_instructions=_response_mode_instructions(response_mode),
+        latest_player_message=state.get("latest_player_message") or "(none)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],

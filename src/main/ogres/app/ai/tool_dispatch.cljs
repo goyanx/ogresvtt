@@ -1,6 +1,7 @@
 (ns ogres.app.ai.tool-dispatch
   (:require [datascript.core :as ds]
             [ogres.app.ai.narration :as narration]
+            [ogres.app.audio :as audio]
             [ogres.app.collision :as collision]
             [ogres.app.const :refer [grid-size]]
             [ogres.app.pathfind :as pathfind]
@@ -143,6 +144,24 @@
             {:ok true})))
     {:ok false :reason (str "Token " token_id " not found.")}))
 
+(def ^:private token-meta-max-chars
+  4000)
+
+(defmethod dispatch-tool "update_token_attribute"
+  [dispatch db _ {:keys [token_id text mode]} _opts]
+  (if (valid-token? db token_id)
+    (let [raw      (if (string? text) text (str text))
+          existing (or (:token/meta (ds/entity db token_id)) "")
+          merged   (if (and (= mode "append") (seq existing) (seq raw))
+                     (str existing "\n" raw)
+                     raw)
+          short    (if (> (count merged) token-meta-max-chars)
+                     (subs merged 0 token-meta-max-chars)
+                     merged)]
+      (dispatch :token/change-meta [token_id] short)
+      {:ok true :updated token_id :mode (or mode "replace")})
+    {:ok false :reason (str "Token " token_id " not found.")}))
+
 (defmethod dispatch-tool "update_hp"
   [dispatch db _ {:keys [token_id hp]} _opts]
   (if (valid-token? db token_id)
@@ -191,6 +210,14 @@
                         walls doors from_x from_y to_x to_y)]
       {:ok true :waypoints waypoints}
       {:ok false :reason "No walkable path found between those points."})))
+
+(defmethod dispatch-tool "set_ambience"
+  [_dispatch _db _ {:keys [mood]} _opts]
+  (audio/set-ambience! (or mood "none")))
+
+(defmethod dispatch-tool "play_sound"
+  [_dispatch _db _ {:keys [effect]} _opts]
+  (audio/play-effect! (or effect "")))
 
 (defmethod dispatch-tool "set_door_state"
   [dispatch db _ {:keys [door_index closed]} _opts]

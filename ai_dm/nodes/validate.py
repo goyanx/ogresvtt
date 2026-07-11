@@ -13,11 +13,14 @@ from pydantic import ValidationError
 from ai_dm.state import DMState
 from ai_dm.schemas_tool_args import (
     ApplyDamageArgs,
+    PlaySoundArgs,
     ResolveAttackVsAcArgs,
     ResolveDamageArgs,
     RollDiceArgs,
     RollInitiativeArgs,
+    SetAmbienceArgs,
     UpdateHpArgs,
+    UpdateTokenAttributeArgs,
 )
 
 # These tools must never target a player-flagged token
@@ -35,6 +38,9 @@ SCHEMA_VALIDATORS = {
     "roll_initiative": RollInitiativeArgs,
     "update_hp": UpdateHpArgs,
     "apply_damage": ApplyDamageArgs,
+    "update_token_attribute": UpdateTokenAttributeArgs,
+    "set_ambience": SetAmbienceArgs,
+    "play_sound": PlaySoundArgs,
 }
 
 

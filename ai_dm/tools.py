@@ -8,7 +8,7 @@ TOOL_DEFINITIONS = [
             "name": "list_tokens",
             "description": (
                 "Query current board tokens from serialized game state. "
-                "Returns id, label, type (player/npc), position, size, hp, flags."
+                "Returns id, label, type (player/npc), position, size, hp, flags, and notes."
             ),
             "parameters": {
                 "type": "object",
@@ -545,6 +545,33 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "update_token_attribute",
+            "description": (
+                "Persist token notes/attributes used for roleplay context, behavior, motives, "
+                "or status not represented by HP/flags. Use mode 'append' to add a new lasting "
+                "fact without erasing existing notes; use 'replace' to rewrite them entirely."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "token_id": {"type": "integer"},
+                    "text": {
+                        "type": "string",
+                        "description": "Notes/attributes text. Empty string with mode 'replace' clears the notes.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                        "description": "replace overwrites all notes; append adds text as a new line. Defaults to replace.",
+                    },
+                },
+                "required": ["token_id", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_hp",
             "description": "Set a token's current hit points.",
             "parameters": {
@@ -620,6 +647,54 @@ TOOL_DEFINITIONS = [
                     },
                 },
                 "required": ["token_id", "direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_ambience",
+            "description": (
+                "Switch the looping ambient soundscape heard by the players. Use when the "
+                "location or overall mood changes. Use 'battle' when combat starts and restore "
+                "the scene mood when it ends. Use 'none' for silence."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mood": {
+                        "type": "string",
+                        "enum": [
+                            "none", "dungeon", "cave", "forest", "tavern",
+                            "battle", "storm", "mystic", "calm",
+                        ],
+                    },
+                },
+                "required": ["mood"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_sound",
+            "description": (
+                "Play a one-shot sound effect to punctuate an impactful moment (a hit, a spell, "
+                "a door, a death). Use sparingly — at most one or two per turn."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string",
+                        "enum": [
+                            "sword_clash", "arrow_whoosh", "magic_cast", "fireball",
+                            "door_creak", "thunder", "monster_roar", "coins", "dice_roll",
+                            "heal", "victory_fanfare", "damage_hit", "death_knell",
+                        ],
+                    },
+                },
+                "required": ["effect"],
             },
         },
     },

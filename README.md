@@ -66,6 +66,9 @@
 - Can end combat cleanly by leaving initiative when surrender/truce/retreat resolves an encounter
 - Narrates events to all players in real time via the DM Narration panel
 - Two-way chat — ask the DM questions and get in-character responses
+- Table chat panel (💬) — player messages feed the AI DM as declared actions
+- Persistent token notes/attributes the DM reads every turn and can update itself
+- Generated ambient soundscapes and one-shot sound effects the DM switches to match the scene (no audio files needed — everything is synthesized in the browser)
 - Voice narration via Kokoro TTS (British male narrator by default)
 - Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
 - LangGraph mode adds assess → plan → validate → reflect-retry reasoning loop
@@ -178,7 +181,51 @@ AI DM combat behavior notes:
   - `dm_turn tool_calls detail=[...]`
 - When combat is over, the DM may emit `leave_initiative` to clear initiative state.
 
-### 8) Voice narration (optional)
+### 8) Soundscapes & sound effects (no setup required)
+
+The AI DM can play looping ambient soundscapes and one-shot sound effects.
+Everything is synthesized live with the Web Audio API — there are no audio
+files to download and no extra process to run.
+
+Enable it in the **✦ AI DM** panel:
+
+1. Turn on **Soundscape & effects**.
+2. Pick an **Ambience** mood manually, or let the DM switch it with the
+   `set_ambience` tool as the story moves (it uses `battle` when combat starts
+   and restores the scene mood afterwards).
+3. Adjust **Audio volume**, and use **Preview effect** to audition any sound.
+
+Available ambience moods: `dungeon`, `cave`, `forest`, `tavern`, `battle`,
+`storm`, `mystic`, `calm` (and `none` for silence).
+
+Available effects (used by the DM via the `play_sound` tool): `sword_clash`,
+`arrow_whoosh`, `magic_cast`, `fireball`, `door_creak`, `thunder`,
+`monster_roar`, `coins`, `dice_roll`, `heal`, `victory_fanfare`,
+`damage_hit`, `death_knell`.
+
+Notes:
+- Browsers block audio until you interact with the page once; if you hear
+  nothing, click anywhere in the app and it will resume.
+- Settings (enabled, volume, last mood) persist in the browser.
+
+### 9) Token notes / attributes (AI DM memory per token)
+
+Right-click a token → **Attributes** (journal icon) to attach free-text notes:
+personality, motives, oaths, fears, conditions not covered by HP/flags.
+
+- The AI DM reads a summary of every token's notes each turn.
+- The DM persists lasting facts itself with the `update_token_attribute`
+  tool — `append` mode adds a new line without erasing what you wrote.
+- Copy/paste buttons move notes between tokens; Clear empties them.
+
+### 10) Table chat (💬)
+
+The **Table chat** panel is available to both host and players. Player
+messages are read by the AI DM as declared actions ("I attack the goblin",
+"I move north"), which is how a solo player drives their character between
+DM turns.
+
+### 11) Voice narration (optional)
 
 Powered by [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M).
 
@@ -189,7 +236,7 @@ pip install kokoro soundfile numpy
 Windows phonemization may require espeak-ng:
 [espeak-ng latest releases](https://github.com/espeak-ng/espeak-ng/releases/latest)
 
-### 9) Troubleshooting
+### 12) Troubleshooting
 
 - `AI DM Error: Grok API key not set`
   - Direct mode: set key in AI DM panel.
@@ -212,7 +259,8 @@ Windows phonemization may require espeak-ng:
 | 🖼🖼 | Props | Environmental prop images |
 | ⏳ | Initiative | Combat turn tracker |
 | ✦ | **AI DM** | Configure and control the AI Dungeon Master |
-| **T** | **Narration** | DM narration feed and chat |
+| **T** | **Narration** | DM narration feed and host↔DM chat |
+| 💬 | **Table chat** | Player chat — messages feed the AI DM as declared actions |
 | 👥 | Lobby | Online session, room code, player list |
 | 🔧 | Data | Export/import/reset local data |
 
@@ -231,6 +279,10 @@ Windows phonemization may require espeak-ng:
 | **Voice narration** | Speak narration aloud via Kokoro TTS |
 | **Voice** | TTS voice character (George British male recommended) |
 | **Speed** | Narration speaking rate (0.95× = slightly slower, more dramatic) |
+| **Soundscape & effects** | Enable generated ambient audio and sound effects |
+| **Ambience** | Current soundscape mood (also switched by the DM via `set_ambience`) |
+| **Audio volume** | Master volume for ambience and effects |
+| **Preview effect** | Audition any of the built-in synthesized effects |
 
 ---
 
@@ -242,11 +294,20 @@ docker compose up -d
 
 For full configuration options see the [wiki docs](https://github.com/samcf/ogres/wiki/Docker-Usage).
 
+## Running the tests
+
+```powershell
+npx shadow-cljs compile test
+```
+
+Runs the ClojureScript test suite (collision, pathfinding, dd2vtt import,
+events, and AI tool dispatch) under Node.
+
 ## Contributing
 
 Interested in helping fix bugs or extending features? Look for issues labeled **beginner friendly** and comment that you'd like to work on it.
 
-### 10) SQLite RAG + Data Admin (LangGraph sidecar)
+### 13) SQLite RAG + Data Admin (LangGraph sidecar)
 
 The sidecar now initializes a local SQLite database for compendium RAG and
 campaign runtime memory (characters, stats, combat events, NPC relationships,
@@ -287,7 +348,7 @@ See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for schema/admin detail
 
 LangGraph DM can now emit `show_map` action tool calls to request scene/map switching in the client, backed by `map_scenes` config in SQLite.
 
-### 11) Import `marker-pdf` campaign output with Grok tool-calling
+### 14) Import `marker-pdf` campaign output with Grok tool-calling
 
 Use the standalone CLI importer to ingest `marker_single` output into SQLite RAG
 and campaign tables. This script is independent from sidecar runtime code

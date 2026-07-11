@@ -41,10 +41,12 @@
    :session/conns     {:db/valueType :db.type/ref :db.cardinality :db.cardinality/many :db/isComponent true}
    :session/host      {:db/valueType :db.type/ref}
    :token/image       {:db/valueType :db.type/ref}
+   :token/meta        {}
    :user/camera       {:db/valueType :db.type/ref}
    :user/cameras      {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}
    :user/dragging     {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
    :user/image        {:db/valueType :db.type/ref}
+   :user/token-meta-clipboard {}
    :user/uuid         {:db/unique :db.unique/identity}})
 
 (defn initial-data [host]
@@ -59,6 +61,7 @@
     [:db/add -3 :db/ident :user]
     [:db/add -3 :user/ready false]
     [:db/add -3 :user/color "red"]
+    [:db/add -3 :user/token-meta-clipboard ""]
     [:db/add -3 :user/camera -4]
     [:db/add -3 :user/cameras -4]
     [:db/add -3 :user/host host]

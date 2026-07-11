@@ -266,6 +266,7 @@
                               (.catch (fn [_] nil))
                               (.then
                                 (fn []
+                                  (let [game-state (or (prompt/serialize-game-state @conn) "")]
                                   (langgraph/comfy-generate
                                     {:endpoint       (:lg-endpoint config)
                                      :comfy-endpoint (:comfy-endpoint config)
@@ -273,6 +274,7 @@
                                      :prompt-text    seed
                                      :prompt-style   (:scenario config)
                                      :prompt-model-family "flux"
+                                     :game-state    game-state
                                      :llm-backend    (name (or (:lg-backend config) :ollama))
                                      :llm-endpoint   (:endpoint config)
                                      :llm-model      (:model config)
@@ -282,7 +284,7 @@
                                      :comfy-batch-size (:comfy-batch-size config)
                                      :comfy-cfg      (:comfy-cfg config)
                                      :comfy-sampler-name (:comfy-sampler-name config)
-                                     :comfy-scheduler (:comfy-scheduler config)})))
+                                     :comfy-scheduler (:comfy-scheduler config)}))))
                               (.then
                                 (fn [resp]
                                   (let [images (:images resp)
@@ -299,7 +301,7 @@
                       (set! (.-current image-chain-ref) next-job))
                     (catch :default err
                       (js/console.error "Invalid Comfy workflow JSON:" err)))))))
-          [config dispatch])
+          [config dispatch conn])
 
         trigger-turn
         (uix/use-callback

@@ -12,3 +12,6 @@ class DMState(TypedDict):
     retry_count: int
     narration: str
     combat_mode: bool
+    response_mode: str
+    response_mode_reason: str
+    latest_player_message: str

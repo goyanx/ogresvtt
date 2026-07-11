@@ -1,5 +1,6 @@
 (ns ogres.app.component.panel-ai-dm
   (:require [ogres.app.ai.core :as ai]
+            [ogres.app.audio :as audio]
             [ogres.app.component :refer [icon]]
             [ogres.app.hooks :as hooks]
             [uix.core :as uix :refer [defui $]]))
@@ -19,6 +20,53 @@
 (defn ^:private parse-float-safe [value fallback]
   (let [n (js/parseFloat value)]
     (if (js/isNaN n) fallback n)))
+
+(defn ^:private use-audio-state
+  "Subscribes to the generated-audio settings atom."
+  []
+  (let [[s set-s] (uix/use-state @audio/state)]
+    (uix/use-effect
+     (fn []
+       (let [k (keyword (gensym "audio-watch"))]
+         (add-watch audio/state k (fn [_ _ _ n] (set-s n)))
+         (fn [] (remove-watch audio/state k))))
+     [])
+    s))
+
+(defui ^:private audio-fields []
+  (let [{:keys [enabled volume mood]} (use-audio-state)
+        [preview set-preview] (uix/use-state "sword_clash")]
+    ($ :<>
+      ($ field-row {:label "Soundscape & effects"}
+        ($ :input {:type "checkbox"
+                   :checked (boolean enabled)
+                   :on-change #(audio/set-enabled! (not enabled))}))
+      (when enabled
+        ($ :<>
+          ($ field-row {:label "Ambience"}
+            ($ :select
+              {:value mood
+               :on-change #(audio/set-ambience! (.. % -target -value))}
+              (for [m audio/ambience-moods]
+                ($ :option {:key m :value m} (audio/effect-label m)))))
+          ($ field-row {:label (str "Audio volume (" (js/Math.round (* 100 volume)) "%)")}
+            ($ :input {:type "range"
+                       :min 0 :max 1 :step 0.05
+                       :value volume
+                       :on-change #(audio/set-volume! (js/parseFloat (.. % -target -value)))}))
+          ($ field-row {:label "Preview effect"}
+            ($ :div {:style {:display "flex" :gap "6px" :flex 1}}
+              ($ :select
+                {:value preview
+                 :style {:flex 1}
+                 :on-change #(set-preview (.. % -target -value))}
+                (for [e audio/sound-effects]
+                  ($ :option {:key e :value e} (audio/effect-label e))))
+              ($ :button.button.button-neutral
+                {:type "button"
+                 :style {:flex "none"}
+                 :on-click #(audio/play-effect! preview)}
+                ($ icon {:name "play-fill" :size 14})))))))))
 
 (def ^:private comfy-preset-12gb-fast
   {:comfy-steps 16
@@ -295,6 +343,9 @@
                             :on-change #(update-config
                                           (fn [c] (assoc c :voice-speed
                                                     (js/parseFloat (.. % -target -value)))))})))
+
+            ;; Generated soundscape and effects
+            ($ audio-fields)
 
             ;; Interval
             ($ field-row {:label (str "Turn interval (" (/ interval-ms 1000) "s)")}

@@ -438,6 +438,9 @@ async def dm_turn(req: TurnRequest):
         "retry_count": 0,
         "narration": "",
         "combat_mode": False,
+        "response_mode": "npc",
+        "response_mode_reason": "",
+        "latest_player_message": "",
     }
 
     try:
@@ -528,6 +531,7 @@ class ComfyGenerateRequest(BaseModel):
     prompt_text: str = ""
     prompt_style: str = ""
     prompt_model_family: str = ""
+    game_state: str = ""
     llm_backend: str = ""
     llm_endpoint: str = ""
     llm_model: str = ""
@@ -568,6 +572,7 @@ async def dm_comfy_generate(req: ComfyGenerateRequest):
     timeout_secs = int(req.timeout_secs) if req.timeout_secs is not None else DEFAULT_COMFY_TIMEOUT_SECS
     source_prompt = (req.prompt_text or "").strip()
     style_hint = (req.prompt_style or "").strip()
+    game_state = req.game_state or ""
     model_family = (req.prompt_model_family or DEFAULT_COMFY_MODEL_FAMILY or "flux").strip().lower()
     comfy_steps = req.comfy_steps if req.comfy_steps is not None else DEFAULT_COMFY_STEPS
     comfy_width = req.comfy_width if req.comfy_width is not None else DEFAULT_COMFY_WIDTH
@@ -601,6 +606,7 @@ async def dm_comfy_generate(req: ComfyGenerateRequest):
                 "source_prompt": source_prompt,
                 "style_hint": style_hint,
                 "model_family": model_family,
+                "game_state": game_state,
             }
         )
         positive_prompt = (transformed.get("positive_prompt") or source_prompt).strip()

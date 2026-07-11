@@ -46,3 +46,24 @@ class ApplyDamageArgs(BaseModel):
     token_id: int
     amount: conint(ge=0)
     mode: Literal["damage", "healing"] = "damage"
+
+
+class UpdateTokenAttributeArgs(BaseModel):
+    token_id: int
+    text: str = Field(max_length=4000)
+    mode: Literal["replace", "append"] = "replace"
+
+
+class SetAmbienceArgs(BaseModel):
+    mood: Literal[
+        "none", "dungeon", "cave", "forest", "tavern",
+        "battle", "storm", "mystic", "calm",
+    ]
+
+
+class PlaySoundArgs(BaseModel):
+    effect: Literal[
+        "sword_clash", "arrow_whoosh", "magic_cast", "fireball",
+        "door_creak", "thunder", "monster_roar", "coins", "dice_roll",
+        "heal", "victory_fanfare", "damage_hit", "death_knell",
+    ]

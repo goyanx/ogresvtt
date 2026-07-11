@@ -232,21 +232,80 @@
                    ((:on-change props) :token/change-flag value checked)))})
             ($ icon {:name icon-name})))))))
 
+(defui ^:private token-form-meta
+  [{:keys [values on-change clipboard]
+    :or   {values (constantly (list)) on-change identity clipboard ""}}]
+  (let [metas (into [] (values :token/meta))
+        merged? (> (count (into #{} metas)) 1)
+        value (if merged? "" (or (first metas) ""))
+        input (uix/use-ref)]
+    ($ :form.context-menu-form-meta
+      {:on-submit
+       (fn [event]
+          (.preventDefault event)
+          (on-change :token/change-meta (some-> @input .-value)))}
+      ($ :label {:for "token-meta"} "Token Attributes / Notes")
+      ($ :textarea.text.text-ghost
+        {:id "token-meta"
+         :name "token-meta"
+         :rows 6
+         :auto-complete "off"
+         :spell-check false
+         :default-value value
+         :ref input
+         :placeholder
+         (if merged?
+           "Multiple selected tokens have different notes. Type to overwrite."
+           "Paste character details, traits, behavior notes, etc. AI DM reads this each turn.")
+         :on-blur
+         (fn [event]
+           (on-change :token/change-meta (.. event -target -value)))})
+        ($ :.context-menu-meta-actions
+        ($ :button
+          {:type "button"
+           :data-tooltip "Copy token notes"
+           :on-click
+           (fn []
+             (on-change :token/copy-meta))}
+          ($ icon {:name "files"}))
+        ($ :button
+          {:type "button"
+           :disabled (not (seq (or clipboard "")))
+           :data-tooltip "Paste copied notes"
+           :on-click
+           (fn []
+             (when-let [el @input]
+               (set! (.-value el) (or clipboard "")))
+             (on-change :token/paste-meta))}
+          ($ icon {:name "clipboard2-plus"}))
+        ($ :button
+          {:type "button"
+           :data-tooltip "Clear notes"
+           :on-click
+           (fn []
+             (when-let [el @input]
+               (set! (.-value el) ""))
+             (on-change :token/change-meta ""))}
+          ($ icon {:name "x-circle-fill"}))))))
+
 (defui ^:private context-menu-token [props]
   (let [dispatch (hooks/use-dispatch)
         data     (:data props)
+        clip-res (hooks/use-query [[:user/token-meta-clipboard :default ""]])
+        clipboard (:user/token-meta-clipboard clip-res)
         idxs     (into [] (map :db/id) data)]
     ($ context-menu-fn
       {:render-toolbar
        (fn [{:keys [selected on-change]}]
          ($ :<>
-           (for [[form icon-name tooltip]
-                 [[:label "fonts" "Label"]
-                  [:details "sliders" "Options"]
-                  [:conditions "arrow-through-heart-fill" "Conditions"]]]
-             ($ :button
-               {:key form
-                :type "button"
+            (for [[form icon-name tooltip]
+                  [[:label "fonts" "Label"]
+                   [:details "sliders" "Options"]
+                   [:conditions "arrow-through-heart-fill" "Conditions"]
+                   [:meta "journal-bookmark-fill" "Attributes"]]]
+              ($ :button
+                {:key form
+                 :type "button"
                 :data-selected (= selected form)
                 :data-tooltip tooltip
                 :on-click #(on-change form)}
@@ -294,15 +353,20 @@
               (fn []
                 (dispatch :objects/remove-selected))})))}
       (fn [{:keys [selected on-change]}]
-        (let [props {:on-close  #(on-change nil)
-                     :on-change #(apply dispatch %1 idxs %&)
-                     :values    (fn vs
-                                  ([f] (vs f #{}))
-                                  ([f init] (into init (map f) data)))}]
-          (case selected
-            :label      ($ token-form-label props)
-            :details    ($ token-form-details props)
-            :conditions ($ token-form-conditions props)))))))
+         (let [props {:on-close  #(on-change nil)
+                      :on-change #(apply dispatch %1 idxs %&)
+                      :clipboard clipboard
+                      :values    (fn vs
+                                   ([f] (vs f #{}))
+                                   ([f init] (into init (map f) data)))}]
+           (case selected
+             :label      ($ token-form-label props)
+             :details    ($ token-form-details props)
+             :conditions ($ token-form-conditions props)
+             ;; Key the notes form on the selection so switching tokens
+             ;; refreshes the uncontrolled textarea.
+             :meta       ($ token-form-meta
+                           (assoc props :key (apply str (interpose "-" idxs))))))))))
 
 (defui ^:private shape-form-style
   [{:keys [on-change values]}]

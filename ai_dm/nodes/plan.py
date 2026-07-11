@@ -31,6 +31,23 @@ def _env_int(name: str, default: int, minimum: int = 1, maximum: int = 20) -> in
 
 MAX_QUERY_ROUNDS = _env_int("AI_DM_MAX_QUERY_ROUNDS", default=4, minimum=1, maximum=20)
 
+
+def _response_mode_instructions(mode: str) -> str:
+    normalized = (mode or "").strip().lower()
+    if normalized == "dm":
+        return (
+            "- Response stance: DM mode (out-of-character facilitator).\n"
+            "- Use narrate text to answer the player's direct request clearly and factually.\n"
+            "- For inventory/spells/money/stats, prefer get_character_sheet before answering.\n"
+            "- For rules/mechanics, prefer retrieve_rules and/or get_rulings before answering.\n"
+            "- Do not force NPC dialogue voice in this mode."
+        )
+    return (
+        "- Response stance: NPC mode (in-world roleplay).\n"
+        "- Keep narrate text immersive and scene-grounded."
+    )
+
+
 PLAN_PROMPT = """You are an AI Dungeon Master.
 Based on the assessment below, call the appropriate tools to run this turn.
 All output must be English only, including narration text and any freeform tool arguments.
@@ -44,6 +61,13 @@ When needed, use sidecar query tools before acting:
 - upsert_map_config / list_map_configs: map metadata and render settings.\n- upsert_token_position / evaluate_triggers: location-driven narrative events.\n- show_map: switch/render selected map in the client app.
 
 After gathering enough context, call 'narrate' once plus any movement/combat/spawn tools needed.
+
+RESPONSE MODE:
+{response_mode}
+{response_mode_instructions}
+
+LATEST PLAYER MESSAGE:
+{latest_player_message}
 
 Narration guardrail (player-facing):
 - Never reveal DM-only map metadata, hidden trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map codes like N3/N6.
@@ -100,7 +124,11 @@ def _narration_discloses_rolls(narration_text: str, roll_markers: list[set[str]]
 
 
 async def plan(state: DMState, llm_call) -> DMState:
+    response_mode = state.get("response_mode", "npc")
     prompt = PLAN_PROMPT.format(
+        response_mode=response_mode,
+        response_mode_instructions=_response_mode_instructions(response_mode),
+        latest_player_message=state.get("latest_player_message") or "(none)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],

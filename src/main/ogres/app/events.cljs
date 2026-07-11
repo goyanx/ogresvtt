@@ -693,6 +693,26 @@
   (for [id idxs]
     {:db/id id :token/aura-radius radius}))
 
+(defmethod event-tx-fn :token/change-meta
+  [_ _ idxs value]
+  (let [value (some-> value trim)]
+    (for [id idxs]
+      (if (seq value)
+        {:db/id id :token/meta value}
+        [:db/retract id :token/meta]))))
+
+(defmethod event-tx-fn :token/copy-meta
+  [data _ idxs]
+  (let [tokens (ds/pull-many data [:db/id :token/meta] idxs)
+        value  (or (some (comp not-empty :token/meta) tokens) "")]
+    [{:db/ident :user :user/token-meta-clipboard value}]))
+
+(defmethod event-tx-fn :token/paste-meta
+  [data _ idxs]
+  (let [user  (ds/entity data [:db/ident :user])
+        value (or (:user/token-meta-clipboard user) "")]
+    [[:db.fn/call event-tx-fn :token/change-meta idxs value]]))
+
 (defmethod event-tx-fn :token/change-dead
   [_ _ idxs add?]
   [[:db.fn/call event-tx-fn :token/change-flag idxs :dead add?]
@@ -1113,6 +1133,7 @@
    :token/light
    :token/size
    :token/aura-radius
+   :token/meta
    :token/image
    :prop/image])
 

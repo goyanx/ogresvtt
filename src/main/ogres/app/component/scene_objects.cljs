@@ -490,6 +490,7 @@
            [:token/size :default 5]
            [:token/light :default 15]
            [:token/aura-radius :default 0]
+           [:token/meta :default ""]
            {:token/image [:token-image/url :image/hash :image/public]}
            {:scene/_initiative [:db/id :initiative/turn]}]}
          {:scene/shapes

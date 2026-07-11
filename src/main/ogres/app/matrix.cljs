@@ -51,4 +51,8 @@
   (translate [_ x y]
     (Matrix. (.translate m x y))))
 
-(def identity (Matrix. (js/DOMMatrixReadOnly.)))
+;; DOMMatrixReadOnly does not exist under Node (the test runner); guard so
+;; namespaces that require this one can still load there.
+(def identity
+  (when (exists? js/DOMMatrixReadOnly)
+    (Matrix. (js/DOMMatrixReadOnly.))))
