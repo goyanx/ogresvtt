@@ -258,6 +258,11 @@ def build_beats_context(turn: int | None = None) -> str:
                 "SELECT title, resolution, resolved_turn FROM beat_promises "
                 "WHERE status='paid_off' ORDER BY resolved_turn DESC LIMIT 2"
             ).fetchall()
+            direction = conn.execute(
+                "SELECT direction, spotlight_beat_id, created_turn FROM beat_directions "
+                "WHERE expires_turn >= ? ORDER BY id DESC LIMIT 1",
+                (turn or 0,),
+            ).fetchone()
 
         lines = [f"Turn {turn}. Open promises: {len(open_beats)}"]
         for beat in open_beats:
@@ -278,6 +283,14 @@ def build_beats_context(turn: int | None = None) -> str:
         for row in recent_paid:
             lines.append(f"- (paid off, turn {row['resolved_turn']}) {row['title']}: "
                          f"{row['resolution']} — usable as callback material.")
+
+        if direction:
+            spotlight = (f" Spotlight beat {direction['spotlight_beat_id']}."
+                         if direction["spotlight_beat_id"] else "")
+            lines.append(
+                f"DIRECTOR'S NOTE (background story review, turn "
+                f"{direction['created_turn']}): {direction['direction']}{spotlight}"
+            )
 
         lines.append("PACING DIRECTIVES (Promise -> Progress -> Payoff):")
         for directive in _directives(open_beats, turn or 0):

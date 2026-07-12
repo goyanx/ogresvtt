@@ -39,6 +39,7 @@ from ai_dm.backends import grok, ollama
 from ai_dm.character_context import build_character_context
 from ai_dm.db import get_conn, init_db, list_tables, resolve_db_path
 from ai_dm.story_beats import build_beats_context, increment_turn
+from ai_dm import story_director
 from ai_dm.ddb_import import extract_character_id, fetch_character, map_character, upsert_character
 from ai_dm.graph import build_graph, build_image_prompt_graph
 from ai_dm.logging_config import configure_logging
@@ -445,8 +446,9 @@ async def dm_turn(req: TurnRequest):
         "response_mode_reason": "",
         "latest_player_message": "",
         "character_context": build_character_context(req.game_state or ""),
-        "beats_context": build_beats_context(increment_turn()),
     }
+    turn_number = increment_turn()
+    initial_state["beats_context"] = build_beats_context(turn_number)
     if initial_state["character_context"]:
         logger.info(
             "dm_turn character_context chars=%s",
@@ -481,6 +483,15 @@ async def dm_turn(req: TurnRequest):
         logger.warning(
             "dm_turn validation_errors detail=%s",
             final_state["validation_errors"],
+        )
+
+    # Background story-director pass: throttled, fire-and-forget, never
+    # blocks the turn response.
+    if story_director.should_run(turn_number):
+        asyncio.create_task(
+            story_director.run_director(
+                llm_call, req.scenario or "", req.history or [], turn_number
+            )
         )
 
     return TurnResponse(

@@ -363,9 +363,21 @@ CREATE TABLE IF NOT EXISTS beat_progress (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS beat_directions (
+  id INTEGER PRIMARY KEY,
+  direction TEXT NOT NULL,
+  reasoning TEXT,
+  spotlight_beat_id INTEGER,
+  created_turn INTEGER,
+  expires_turn INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_beat_progress_beat ON beat_progress(beat_id);
 
 CREATE INDEX IF NOT EXISTS idx_beat_promises_status ON beat_promises(status);
+
+CREATE INDEX IF NOT EXISTS idx_beat_directions_expiry ON beat_directions(expires_turn);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_map_regions_scene_key
   ON map_regions(scene_id, region_key);

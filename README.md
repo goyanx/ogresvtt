@@ -511,3 +511,21 @@ The ledger is DM-internal (never mentioned to players), inspectable at
 `/dm-admin` (tables `beat_promises`, `beat_progress`), and persists across
 sessions — so a promise made tonight pays off next week. Requires the
 LangGraph sidecar backend.
+
+**Background story director.** To keep the player from drifting headlessly,
+a director pass periodically reviews the ledger and recent play between
+turns and asks one question: *is the story still pointed somewhere the
+player can feel?* Its answer is stored as a **DIRECTOR'S NOTE** inside the
+STORY BEATS block (e.g. "Steer the party back toward the cult: have the
+innkeeper mention disappearances on the east road"), optionally
+spotlighting one beat, and expires automatically after a few turns.
+
+It is deliberately cheap:
+- runs at most once every `AI_DM_DIRECTOR_EVERY_TURNS` DM turns (default 5)
+  **and** at most once every `AI_DM_DIRECTOR_MIN_SECONDS` seconds
+  (default 300) — nothing runs while you're not playing
+- scheduled fire-and-forget *after* the turn response is sent, so it never
+  adds latency to your turn
+- one small no-tools LLM call using the same backend as the turn
+- disable with `AI_DM_DIRECTOR_ENABLED=false`
+- recent notes are visible in `/dm-admin` (table `beat_directions`)
