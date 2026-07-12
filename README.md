@@ -429,3 +429,50 @@ Useful flags:
 
 See [docs/AI_DM_DATA_ADMIN.md](docs/AI_DM_DATA_ADMIN.md) for DB domains and tooling context.
 Quickstart: [docs/MARKER_IMPORTER_QUICKSTART.md](docs/MARKER_IMPORTER_QUICKSTART.md)
+
+### 17) Import a D&D Beyond adventure you own
+
+`scripts/ddb_fetch_sources.py` converts DDB source/adventure chapters into
+the markdown folder format that the section-16 importer consumes, and
+downloads the map/handout images referenced by each chapter into
+`<out-dir>/images/` (that was the tedious part — no more hunting maps).
+
+**Option A — browser-saved pages (no scripted site access at all):**
+while logged in, open each chapter and save it (`Ctrl+S`, "HTML only")
+into one folder, then:
+
+```powershell
+python scripts/ddb_fetch_sources.py --html-dir C:\campaigns\lmop_saved --out-dir C:\campaigns\lmop
+```
+
+**Option B — direct fetch with your session cookie.** Copy the
+`CobaltSession` cookie value from your browser (DevTools → Application →
+Cookies → dndbeyond.com) into `.env.local` as `DDB_COBALT_SESSION=...`
+(this file is git-ignored), then:
+
+```powershell
+python scripts/ddb_fetch_sources.py `
+  --url https://www.dndbeyond.com/sources/dnd/lmop `
+  --whole-book --out-dir C:\campaigns\lmop
+```
+
+`--whole-book` discovers every chapter from the table of contents;
+`--delay` (default 1.5s) spaces out requests; `--no-images` skips image
+downloads. If DDB returns 403 for scripted access, fall back to Option A.
+
+> **Note:** automated access is against D&D Beyond's Terms of Service.
+> Option B exists for personal import of adventures you have purchased,
+> with your own account, at your own risk — Option A avoids the issue
+> entirely. Never commit your cookie.
+
+**Then finish the pipeline:**
+
+```powershell
+python scripts/marker_import_grok.py --marker-dir C:\campaigns\lmop `
+  --source-title "Lost Mine of Phandelver" --edition 5e
+```
+
+That populates the rules RAG plus NPC/map tables, which the DM auto-reads
+every turn (section 14). Upload the downloaded map images from
+`C:\campaigns\lmop\images\` as scene backgrounds in the app, name the
+scenes after their chapters, and play.
