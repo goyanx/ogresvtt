@@ -73,6 +73,14 @@ Narration guardrail (player-facing):
 - Never reveal DM-only map metadata, hidden trigger notes, AREA REGION CONTEXT text, BLOCKED LINE OF SIGHT summaries, or region-map codes like N3/N6.
 - Do not mention internal IDs/keys/labels from the game state. Convert secret/internal context into sensory, in-world description only.
 
+STORY BEATS (Promise / Progress / Payoff ledger):
+{beats_context}
+Beat duties this turn (follow the pacing directives above):
+- When you make a new narrative commitment in narration, record it with promise_beat.
+- When this turn's events visibly advance a promise, record it with progress_beat.
+- When a ripe promise resolves, deliver it in narration referencing its setup, record payoff_beat, then seed the next promise.
+- Do not mention beats, promises, or the ledger to players — it is DM-internal.
+
 CHARACTER SHEETS (authoritative stats from the campaign database):
 {character_context}
 - Use these stats for ability checks, saves, attacks, and HP instead of inventing numbers.
@@ -135,6 +143,7 @@ async def plan(state: DMState, llm_call) -> DMState:
         response_mode_instructions=_response_mode_instructions(response_mode),
         latest_player_message=state.get("latest_player_message") or "(none)",
         character_context=state.get("character_context") or "(none on file)",
+        beats_context=state.get("beats_context") or "(no beat ledger)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],

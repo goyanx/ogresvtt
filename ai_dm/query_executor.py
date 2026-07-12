@@ -12,6 +12,7 @@ import random
 import re
 from typing import Any
 
+from ai_dm import story_beats
 from ai_dm.db import get_conn
 
 
@@ -1260,6 +1261,14 @@ def execute_query_tool(tool_name: str, arguments: dict, game_state: str) -> str:
                 result = _save_ruling(conn, arguments)
             elif tool_name == "get_rulings":
                 result = _get_rulings(conn, arguments)
+            elif tool_name == "promise_beat":
+                result = story_beats.promise_beat(conn, arguments)
+            elif tool_name == "progress_beat":
+                result = story_beats.progress_beat(conn, arguments)
+            elif tool_name == "payoff_beat":
+                result = story_beats.payoff_beat(conn, arguments)
+            elif tool_name == "list_beats":
+                result = story_beats.list_beats(conn, arguments)
             else:
                 result = {"error": f"Unknown query tool: {tool_name}"}
 

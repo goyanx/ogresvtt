@@ -653,6 +653,83 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "promise_beat",
+            "description": (
+                "Record a new story promise (Sanderson: Promise/Progress/Payoff): a concrete "
+                "narrative commitment the player can anticipate — a foe to confront, a mystery, "
+                "a debt, a character arc. Foreshadow it in narration when you promise it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short memorable name for the promise."},
+                    "promise": {"type": "string", "description": "What is being promised to the player."},
+                    "payoff_condition": {"type": "string", "description": "What event would satisfyingly pay this off."},
+                    "subject": {"type": "string", "description": "Character/NPC/place this promise concerns."},
+                    "tension": {"type": "string", "enum": ["minor", "standard", "major"],
+                                "description": "minor = scene-level, standard = arc, major = campaign arc."},
+                },
+                "required": ["title", "promise"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "progress_beat",
+            "description": (
+                "Record visible movement on an open promise — escalation, revelation, or "
+                "consequence the player can feel. Call this whenever this turn's events "
+                "advanced a promise."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "beat_id": {"type": "integer"},
+                    "title": {"type": "string", "description": "Exact title, if beat_id is unknown."},
+                    "note": {"type": "string", "description": "What visibly moved this turn."},
+                },
+                "required": ["note"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "payoff_beat",
+            "description": (
+                "Resolve an open promise. The payoff should land surprising-yet-inevitable and "
+                "reference its setup. Afterwards, seed the next promise. Set abandoned=true to "
+                "retire a promise that no longer fits instead of paying it off."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "beat_id": {"type": "integer"},
+                    "title": {"type": "string", "description": "Exact title, if beat_id is unknown."},
+                    "resolution": {"type": "string", "description": "How the promise resolved (or why it was retired)."},
+                    "abandoned": {"type": "boolean", "description": "true = retire without payoff."},
+                },
+                "required": ["resolution"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_beats",
+            "description": "List story promises and their progress from the beat ledger.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["open", "paid_off", "abandoned", "all"]},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "set_ambience",
             "description": (
                 "Switch the looping ambient soundscape heard by the players. Use when the "
@@ -745,4 +822,8 @@ QUERY_TOOLS = {
     "evaluate_triggers",
     "save_ruling",
     "get_rulings",
+    "promise_beat",
+    "progress_beat",
+    "payoff_beat",
+    "list_beats",
 }

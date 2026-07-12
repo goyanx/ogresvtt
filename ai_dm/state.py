@@ -16,3 +16,4 @@ class DMState(TypedDict):
     response_mode_reason: str
     latest_player_message: str
     character_context: str
+    beats_context: str

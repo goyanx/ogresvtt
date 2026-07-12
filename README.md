@@ -70,6 +70,7 @@
 - Persistent token notes/attributes the DM reads every turn and can update itself
 - Character sheets from the campaign database (stats, HP, spell slots, gear) are auto-injected into every DM turn — party always, NPCs when their token is on the board
 - One-call D&D Beyond character import into the campaign database
+- Story beat harness (Sanderson's Promise / Progress / Payoff): the DM keeps a persistent ledger of narrative promises and gets per-turn pacing directives to establish, advance, and pay them off
 - Generated ambient soundscapes and one-shot sound effects the DM switches to match the scene (no audio files needed — everything is synthesized in the browser)
 - Voice narration via Kokoro TTS (British male narrator by default)
 - Backends: Ollama (local/private), Grok xAI (cloud), LangGraph sidecar (multi-step agentic)
@@ -476,3 +477,37 @@ That populates the rules RAG plus NPC/map tables, which the DM auto-reads
 every turn (section 14). Upload the downloaded map images from
 `C:\campaigns\lmop\images\` as scene backgrounds in the app, name the
 scenes after their chapters, and play.
+
+### 18) Story beats: Promise / Progress / Payoff (LangGraph sidecar)
+
+Following Brandon Sanderson's plotting framework, the DM loop keeps a
+persistent **beat ledger** (`beat_*` tables) so the campaign has actual
+narrative structure instead of turn-by-turn improvisation:
+
+- **Promise** — the DM records concrete narrative commitments with
+  `promise_beat` (a villain to confront, a mystery, a debt, an arc), with a
+  tension tier: `minor` (scene), `standard` (arc), `major` (campaign).
+- **Progress** — when a turn's events visibly advance a promise, the DM
+  records it with `progress_beat`. Progress the player can feel:
+  escalation, revelation, consequence — not filler.
+- **Payoff** — once a beat has enough progress steps (2 / 3 / 5 by tier),
+  it's flagged ripe; the DM resolves it with `payoff_beat` so the landing
+  is "surprising yet inevitable", then seeds the next promise.
+
+Every `/dm/turn` increments a turn counter and injects a **STORY BEATS**
+block into the assess, plan, and combat prompts: open promises with their
+progress, recently paid-off beats (as callback material), and deterministic
+**pacing directives** computed by the harness:
+
+| Ledger state | Directive |
+|---|---|
+| No open promises | Establish one this turn (and foreshadow it) |
+| Beat idle ≥ 4 turns | Advance it visibly or retire it |
+| Beat at its progress threshold | Ripe — pay it off, then seed the next promise |
+| 5 open promises | Stop promising; progress or pay off instead |
+| Otherwise | Advance at least one promise with visible movement |
+
+The ledger is DM-internal (never mentioned to players), inspectable at
+`/dm-admin` (tables `beat_promises`, `beat_progress`), and persists across
+sessions — so a promise made tonight pays off next week. Requires the
+LangGraph sidecar backend.

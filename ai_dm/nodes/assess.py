@@ -24,6 +24,11 @@ LATEST PLAYER MESSAGE:
 RESPONSE MODE:
 {response_mode} ({response_mode_reason})
 
+STORY BEATS (Promise / Progress / Payoff ledger):
+{beats_context}
+When assessing, consider which open promise this turn could visibly advance,
+and whether any ripe promise could pay off here.
+
 CHARACTER SHEETS (authoritative stats from the campaign database):
 {character_context}
 
@@ -46,6 +51,7 @@ async def assess(state: DMState, llm_call) -> DMState:
         response_mode=response_mode,
         response_mode_reason=response_mode_reason,
         character_context=state.get("character_context") or "(none on file)",
+        beats_context=state.get("beats_context") or "(no beat ledger)",
         scenario=state["scenario"] or "(none)",
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"] or "(empty scene)",

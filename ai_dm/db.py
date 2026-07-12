@@ -333,6 +333,40 @@ CREATE TABLE IF NOT EXISTS dm_rulings (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS beat_meta (
+  key TEXT PRIMARY KEY,
+  value INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS beat_promises (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  promise TEXT NOT NULL,
+  payoff_condition TEXT,
+  subject TEXT,
+  tension TEXT NOT NULL DEFAULT 'standard',
+  status TEXT NOT NULL DEFAULT 'open',
+  progress_count INTEGER NOT NULL DEFAULT 0,
+  created_turn INTEGER,
+  last_progress_turn INTEGER,
+  resolution TEXT,
+  resolved_turn INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS beat_progress (
+  id INTEGER PRIMARY KEY,
+  beat_id INTEGER NOT NULL REFERENCES beat_promises(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  turn INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_beat_progress_beat ON beat_progress(beat_id);
+
+CREATE INDEX IF NOT EXISTS idx_beat_promises_status ON beat_promises(status);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_map_regions_scene_key
   ON map_regions(scene_id, region_key);
 

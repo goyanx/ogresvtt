@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from ai_dm.backends import grok, ollama
 from ai_dm.character_context import build_character_context
 from ai_dm.db import get_conn, init_db, list_tables, resolve_db_path
+from ai_dm.story_beats import build_beats_context, increment_turn
 from ai_dm.ddb_import import extract_character_id, fetch_character, map_character, upsert_character
 from ai_dm.graph import build_graph, build_image_prompt_graph
 from ai_dm.logging_config import configure_logging
@@ -444,11 +445,17 @@ async def dm_turn(req: TurnRequest):
         "response_mode_reason": "",
         "latest_player_message": "",
         "character_context": build_character_context(req.game_state or ""),
+        "beats_context": build_beats_context(increment_turn()),
     }
     if initial_state["character_context"]:
         logger.info(
             "dm_turn character_context chars=%s",
             len(initial_state["character_context"]),
+        )
+    if initial_state["beats_context"]:
+        logger.info(
+            "dm_turn beats_context chars=%s",
+            len(initial_state["beats_context"]),
         )
 
     try:

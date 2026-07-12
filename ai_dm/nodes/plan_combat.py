@@ -79,6 +79,13 @@ RESPONSE MODE:
 LATEST PLAYER MESSAGE:
 {latest_player_message}
 
+STORY BEATS (Promise / Progress / Payoff ledger):
+{beats_context}
+Combat serves the story: if this turn's outcome visibly advances an open promise
+(the promised foe appears, a rival falls, a secret surfaces mid-fight), record it
+with progress_beat — and if a promise resolves (e.g. the promised villain is
+defeated), record payoff_beat. Never mention the ledger to players.
+
 CHARACTER SHEETS (authoritative stats from the campaign database):
 {character_context}
 - Use these ability modifiers, HP, and resources for attacks, saves, and damage instead of inventing numbers.
@@ -141,6 +148,7 @@ async def plan_combat(state: DMState, llm_call) -> DMState:
         response_mode_instructions=_response_mode_instructions(response_mode),
         latest_player_message=state.get("latest_player_message") or "(none)",
         character_context=state.get("character_context") or "(none on file)",
+        beats_context=state.get("beats_context") or "(no beat ledger)",
         plan=state["plan"],
         system_prompt=state.get("system_prompt") or "(none)",
         game_state=state["game_state"],
